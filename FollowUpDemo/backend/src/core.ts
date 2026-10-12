@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 export const CALENDLY = 'https://calendly.com/arnavnambiar981/30min';
 export const DEFAULT_SEND_CUE = "I just realized I haven't shown you how good I am as a developer";
-export type Phase = 'IDLE' | 'DRAFTING' | 'PAUSED' | 'REVIEW' | 'ARMED' | 'SENDING' | 'SENT' | 'FAILED' | 'UNKNOWN' | 'DRY_RUN' | 'ENDED';
+export type Phase = 'IDLE' | 'DRAFTING' | 'GENERATING' | 'PAUSED' | 'REVIEW' | 'ARMED' | 'SENDING' | 'SENT' | 'FAILED' | 'UNKNOWN' | 'DRY_RUN' | 'ENDED';
 export type Source = 'meta-speech' | 'hfp' | 'simulation';
 export type Segment = { id: string; sequence: number; epoch: string; text: string; final: boolean; source: Source; capturedMs: number; speaker: 'unknown' | 'wearer' | 'prospect' };
 export type Draft = { version: number; subject: string; body: string; calendly: string; evidenceIds: string[] };
@@ -14,7 +14,8 @@ export type Session = {
   reviewPage: number; arm: { epoch: string; minCaptureMs: number; deadline: number } | null;
   created: number; expires: number; outcome: string; outboxId: string | null;
 };
-export type Config = { cue: string; live: boolean; allowlist: string[]; hardwareVerified: boolean };
+export type Config = { cue: string; live: boolean; allowlist: string[]; hardwareVerified: boolean; oneTap?: boolean };
+export type Drafter = { draft: (segments: Segment[], version: number) => Promise<Draft> };
 export type ProviderOutcome = { status: 'SENT' | 'FAILED' | 'UNKNOWN'; detail: string; providerId?: string };
 export type Sender = { send: (message: { recipient: string; subject: string; body: string; identity: string }) => Promise<ProviderOutcome> };
 export class Fault extends Error {
@@ -95,7 +96,11 @@ export class Store {
 
 export class Controller {
   store: Store; config: Config; sender: Sender; now: () => number;
-  constructor(store: Store, config: Config, sender: Sender, now = Date.now) { this.store = store; this.config = config; this.sender = sender; this.now = now; }
+  drafter?: Drafter;
+  private followupJobs = new Map<string, Promise<Session>>();
+  constructor(store: Store, config: Config, sender: Sender, now = Date.now, drafter?: Drafter) {
+    this.store = store; this.config = config; this.sender = sender; this.now = now; this.drafter = drafter;
+  }
   read(id: string, owner: string): Session {
     const s = this.store.get(id, owner);
     if (s.arm && this.now() >= s.arm.deadline) { s.phase = 'REVIEW'; s.arm = null; this.store.put(s); }
@@ -125,6 +130,7 @@ export class Controller {
     return this.store.transaction(() => {
       const s = this.read(id, owner);
       if (['SENDING','SENT','UNKNOWN','DRY_RUN','FAILED','ENDED'].includes(s.phase)) throw new Fault('Terminal/ambiguous send state; reset for a new conversation.');
+      if (s.phase === 'GENERATING' && !['pause','recipient','edit'].includes(action)) throw new Fault('Email generation is in progress; pause or cancel before changing the session.');
       switch (action) {
         case 'recipient':
           s.recipient = email(input.recipient); s.confirmed = false; s.approved = null; s.arm = null; s.phase = 'DRAFTING'; s.reviewPage = -1; break;
@@ -165,7 +171,7 @@ export class Controller {
     this.store.transaction(() => {
       const s = this.read(id, owner);
       if (!input || typeof input.text !== 'string' || input.text.length > 4000 || !Number.isInteger(input.sequence) || !Number.isFinite(input.capturedMs) || typeof input.id !== 'string') throw new Fault('Invalid transcript segment', 400);
-      if (input.epoch !== s.epoch || input.source !== s.source || input.sequence <= s.lastSequence || ['PAUSED','ENDED','SENDING','SENT','UNKNOWN','DRY_RUN','FAILED'].includes(s.phase)) return;
+      if (input.epoch !== s.epoch || input.source !== s.source || input.sequence <= s.lastSequence || ['GENERATING','PAUSED','ENDED','SENDING','SENT','UNKNOWN','DRY_RUN','FAILED'].includes(s.phase)) return;
       if (input.final !== true) return; // Partials are local UI only; never commands/notes.
       s.lastSequence = input.sequence;
       if (s.phase === 'ARMED' && s.arm && s.approved) {
@@ -186,7 +192,83 @@ export class Controller {
       }
       this.store.put(s);
     });
-    if (pending) {
+    if (pending) await this.dispatch(id, owner, pending);
+    return this.read(id, owner);
+  }
+  followup(id: string, owner: string): Session {
+    let snapshot: Session | undefined;
+    const state = this.store.transaction(() => {
+      const s = this.read(id, owner);
+      // A repeated button request observes the same job/outbox; never starts another.
+      if (s.phase === 'GENERATING' || s.outboxId) return s;
+      if (!this.config.oneTap) throw new Fault('Enable one-tap Follow-up on the backend first.');
+      if (!this.drafter) throw new Fault('Configure the server OpenAI API key before generating an email. No email sent.');
+      if (s.phase !== 'DRAFTING' || !s.confirmed || !s.recipient || !s.segments.some(x => x.final && x.text.trim())) {
+        throw new Fault('Start a conversation, confirm the literal recipient, and capture finalized notes before Follow-up.');
+      }
+      if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
+        throw new Fault('Live Follow-up needs verified physical capture/display and an allowlisted test recipient.');
+      }
+      s.phase = 'GENERATING'; s.arm = null; s.epoch = randomUUID();
+      s.outcome = 'Writing the email from finalized conversation notes…';
+      this.store.put(s); snapshot = structuredClone(s); return s;
+    });
+    if (snapshot) {
+      const input = snapshot;
+      let job: Promise<Session>;
+      job = Promise.resolve().then(() => this.generateFollowup(input)).finally(() => {
+        if (this.followupJobs.get(id) === job) this.followupJobs.delete(id);
+      });
+      this.followupJobs.set(id, job);
+      // generateFollowup handles expected failures; this protects shutdown/storage failures.
+      void job.catch(() => { console.error('Follow-up job unavailable; preserve its session and inspect status privately.'); });
+    }
+    return state;
+  }
+  async waitForFollowup(id: string): Promise<void> { await this.followupJobs.get(id); }
+  private async generateFollowup(snapshot: Session): Promise<Session> {
+    const { id, owner, epoch } = snapshot;
+    let draft: Draft;
+    try {
+      draft = await this.drafter!.draft(snapshot.segments, snapshot.revision + 1);
+      if (!draft.subject.trim() || draft.subject.length > 180 || /[\r\n]/.test(draft.subject) || !draft.body.trim() || draft.body.length > 6000
+        || draft.calendly !== CALENDLY || !draft.body.includes(CALENDLY)
+        || !draft.evidenceIds.length || draft.evidenceIds.some(x => !snapshot.segments.some(s => s.id === x && s.final))) {
+        throw new Error('Invalid generated message');
+      }
+    } catch {
+      const s = this.read(id, owner);
+      if (s.phase === 'GENERATING' && s.epoch === epoch) {
+        s.phase = 'DRAFTING'; s.outcome = 'AI drafting failed. No email sent; inspect AI configuration or try Follow-up again deliberately.';
+        this.store.put(s);
+      }
+      return s;
+    }
+    let pending: { identity: string; recipient: string; subject: string; body: string } | undefined;
+    this.store.transaction(() => {
+      const s = this.read(id, owner);
+      // Cancel, correction, expiry, or a new conversation invalidates this result.
+      if (s.phase !== 'GENERATING' || s.epoch !== epoch || !s.confirmed || s.recipient !== snapshot.recipient) return;
+      if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
+        s.phase = 'DRAFTING'; s.outcome = 'Live sending configuration changed. No email sent.'; this.store.put(s); return;
+      }
+      s.draft = { ...draft, version: snapshot.revision + 1 };
+      const message = { ...s.draft, recipient: s.recipient };
+      // Historical API field name; here content is frozen by the explicit send gesture,
+      // not by message review. Recipient/Calendly/dispatch remain controlled by code.
+      s.approved = { ...message, digest: hash(JSON.stringify(message)) };
+      const identity = `${s.id}:${s.approved.digest}`;
+      s.outboxId = identity; s.phase = this.config.live ? 'SENDING' : 'DRY_RUN';
+      s.outcome = this.config.live ? 'Sending the generated email through Gmail…' : 'AI email generated in dry-run mode. No email sent.';
+      this.store.db.prepare('INSERT INTO outbox(id,session_id,digest,status,created) VALUES (?,?,?,?,?)')
+        .run(identity, s.id, s.approved.digest, s.phase, this.now());
+      this.store.put(s);
+      if (this.config.live) pending = { identity, recipient: s.recipient, subject: s.approved.subject, body: s.approved.body };
+    });
+    if (pending) await this.dispatch(id, owner, pending);
+    return this.read(id, owner);
+  }
+  private async dispatch(id: string, owner: string, pending: { identity: string; recipient: string; subject: string; body: string }) {
       // Committed SENDING before I/O. No retry on transport/provider ambiguity.
       let result: ProviderOutcome;
       try { result = await this.sender.send(pending); }
@@ -197,8 +279,6 @@ export class Controller {
         this.store.db.prepare('UPDATE outbox SET status=?,provider_id=? WHERE id=?').run(result.status, result.providerId ?? null, s.outboxId);
         s.phase = result.status; s.outcome = result.detail; s.arm = null; this.store.put(s);
       });
-    }
-    return this.read(id, owner);
   }
   end(id: string, owner: string): Session {
     const s = this.store.get(id, owner);

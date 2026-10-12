@@ -8,6 +8,16 @@ struct FollowUpView: View {
   var body: some View {
     NavigationStack {
       Form {
+        Section("Glasses display — no backend needed") {
+          Button("Register with Meta AI") { Task { await model.wearables.connectGlasses() } }
+          Button("Connect display / show counter") { Task { _ = await model.connect() } }
+          Text(model.display.isConnected ? "Display capability started" : "Display not connected")
+          if let error = model.display.errorMessage { Text(error).foregroundStyle(.red) }
+          if model.wearables.showError { Text(model.wearables.errorMessage).foregroundStyle(.red) }
+          Button("Update glasses firmware") { model.wearables.openFirmwareUpdate() }
+          Button("Update DAT app on glasses") { model.wearables.openDATGlassesAppUpdate() }
+          Text("The counter and capture diagnostic work before backend setup.")
+        }
         Section("Setup before the conversation") {
           TextField("Deployed HTTPS backend URL", text: $model.backendURL).textInputAutocapitalization(.never).autocorrectionDisabled()
           SecureField("Device access token", text: $model.tokenInput)
@@ -15,7 +25,7 @@ struct FollowUpView: View {
           TextField("Recipient: literal full address (typed fallback)", text: $model.recipientCandidate)
             .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
           if model.envelope != nil { Button("Apply recipient correction — invalidates review and arm") { model.action("recipient") } }
-          Toggle("Both participants consent to transcription", isOn: $model.consent)
+          Toggle("Both participants consent to transcription and AI drafting", isOn: $model.consent)
           Picker("Capture path", selection: $model.source) {
             Text("Meta Speech · diagnostic/drafting").tag("meta-speech")
             Text("Selected glasses HFP · on-device ASR").tag("hfp")
@@ -29,21 +39,18 @@ struct FollowUpView: View {
             }
           }
         }.disabled(model.busy)
-        Section("Glasses display") {
-          Button("Register with Meta AI") { Task { await model.wearables.connectGlasses() } }
-          Button("Connect display / show counter") { Task { _ = await model.connect() } }
-          Text(model.display.isConnected ? "Display capability started" : "Display not connected")
-          if let error = model.display.errorMessage { Text(error).foregroundStyle(.red) }
-          Button("Update glasses firmware") { model.wearables.openFirmwareUpdate() }
-          Button("Update DAT app on glasses") { model.wearables.openDATGlassesAppUpdate() }
-          Text("Start, verify recipient, review, arm and cancel on the glasses after setup.")
-        }
         Section("Capture and session diagnostics") {
           Text(model.audioDiagnostic).font(.caption).textSelection(.enabled)
           Text(model.diagnosticRunning ? "Diagnostic capture active — no backend or email" : "Diagnostic capture stopped")
           Text(model.notice).textSelection(.enabled)
           Button("Recover previous dispatch identity (no resend)") { model.recoverLastDispatch() }
           if let s = model.envelope?.session {
+            Text(model.envelope?.oneTapEnabled == true
+              ? "Follow-up generates and sends immediately after recipient confirmation; message review is optional."
+              : "Review, arm and the spoken cue are available; one-tap Follow-up is disabled on this backend.")
+            if model.envelope?.oneTapEnabled == true, model.envelope?.aiConfigured != true {
+              Text("Configure the private OpenAI API key on the backend to enable AI Follow-up.").foregroundStyle(.orange)
+            }
             Text("\(s.phase) · \(s.id)").font(.caption).textSelection(.enabled)
             Button("Check same session’s dispatch status") { model.checkStatus() }
             Button("Stop and delete conversation data", role: .destructive) { model.end() }

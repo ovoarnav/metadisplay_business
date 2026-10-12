@@ -102,7 +102,15 @@ export class Controller {
     config;
     sender;
     now;
-    constructor(store, config, sender, now = Date.now) { this.store = store; this.config = config; this.sender = sender; this.now = now; }
+    drafter;
+    followupJobs = new Map();
+    constructor(store, config, sender, now = Date.now, drafter) {
+        this.store = store;
+        this.config = config;
+        this.sender = sender;
+        this.now = now;
+        this.drafter = drafter;
+    }
     read(id, owner) {
         const s = this.store.get(id, owner);
         if (s.arm && this.now() >= s.arm.deadline) {
@@ -145,6 +153,8 @@ export class Controller {
             const s = this.read(id, owner);
             if (['SENDING', 'SENT', 'UNKNOWN', 'DRY_RUN', 'FAILED', 'ENDED'].includes(s.phase))
                 throw new Fault('Terminal/ambiguous send state; reset for a new conversation.');
+            if (s.phase === 'GENERATING' && !['pause', 'recipient', 'edit'].includes(action))
+                throw new Fault('Email generation is in progress; pause or cancel before changing the session.');
             switch (action) {
                 case 'recipient':
                     s.recipient = email(input.recipient);
@@ -224,7 +234,7 @@ export class Controller {
             const s = this.read(id, owner);
             if (!input || typeof input.text !== 'string' || input.text.length > 4000 || !Number.isInteger(input.sequence) || !Number.isFinite(input.capturedMs) || typeof input.id !== 'string')
                 throw new Fault('Invalid transcript segment', 400);
-            if (input.epoch !== s.epoch || input.source !== s.source || input.sequence <= s.lastSequence || ['PAUSED', 'ENDED', 'SENDING', 'SENT', 'UNKNOWN', 'DRY_RUN', 'FAILED'].includes(s.phase))
+            if (input.epoch !== s.epoch || input.source !== s.source || input.sequence <= s.lastSequence || ['GENERATING', 'PAUSED', 'ENDED', 'SENDING', 'SENT', 'UNKNOWN', 'DRY_RUN', 'FAILED'].includes(s.phase))
                 return;
             if (input.final !== true)
                 return; // Partials are local UI only; never commands/notes.
@@ -254,27 +264,119 @@ export class Controller {
             }
             this.store.put(s);
         });
-        if (pending) {
-            // Committed SENDING before I/O. No retry on transport/provider ambiguity.
-            let result;
-            try {
-                result = await this.sender.send(pending);
-            }
-            catch {
-                result = { status: 'UNKNOWN', detail: 'Provider outcome unknown; inspect Gmail Sent. Do not resend.' };
-            }
-            this.store.transaction(() => {
-                const s = this.store.get(id, owner);
-                if (!s.outboxId)
-                    throw new Fault('Send identity missing');
-                this.store.db.prepare('UPDATE outbox SET status=?,provider_id=? WHERE id=?').run(result.status, result.providerId ?? null, s.outboxId);
-                s.phase = result.status;
-                s.outcome = result.detail;
-                s.arm = null;
-                this.store.put(s);
-            });
-        }
+        if (pending)
+            await this.dispatch(id, owner, pending);
         return this.read(id, owner);
+    }
+    followup(id, owner) {
+        let snapshot;
+        const state = this.store.transaction(() => {
+            const s = this.read(id, owner);
+            // A repeated button request observes the same job/outbox; never starts another.
+            if (s.phase === 'GENERATING' || s.outboxId)
+                return s;
+            if (!this.config.oneTap)
+                throw new Fault('Enable one-tap Follow-up on the backend first.');
+            if (!this.drafter)
+                throw new Fault('Configure the server OpenAI API key before generating an email. No email sent.');
+            if (s.phase !== 'DRAFTING' || !s.confirmed || !s.recipient || !s.segments.some(x => x.final && x.text.trim())) {
+                throw new Fault('Start a conversation, confirm the literal recipient, and capture finalized notes before Follow-up.');
+            }
+            if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
+                throw new Fault('Live Follow-up needs verified physical capture/display and an allowlisted test recipient.');
+            }
+            s.phase = 'GENERATING';
+            s.arm = null;
+            s.epoch = randomUUID();
+            s.outcome = 'Writing the email from finalized conversation notes…';
+            this.store.put(s);
+            snapshot = structuredClone(s);
+            return s;
+        });
+        if (snapshot) {
+            const input = snapshot;
+            let job;
+            job = Promise.resolve().then(() => this.generateFollowup(input)).finally(() => {
+                if (this.followupJobs.get(id) === job)
+                    this.followupJobs.delete(id);
+            });
+            this.followupJobs.set(id, job);
+            // generateFollowup handles expected failures; this protects shutdown/storage failures.
+            void job.catch(() => { console.error('Follow-up job unavailable; preserve its session and inspect status privately.'); });
+        }
+        return state;
+    }
+    async waitForFollowup(id) { await this.followupJobs.get(id); }
+    async generateFollowup(snapshot) {
+        const { id, owner, epoch } = snapshot;
+        let draft;
+        try {
+            draft = await this.drafter.draft(snapshot.segments, snapshot.revision + 1);
+            if (!draft.subject.trim() || draft.subject.length > 180 || /[\r\n]/.test(draft.subject) || !draft.body.trim() || draft.body.length > 6000
+                || draft.calendly !== CALENDLY || !draft.body.includes(CALENDLY)
+                || !draft.evidenceIds.length || draft.evidenceIds.some(x => !snapshot.segments.some(s => s.id === x && s.final))) {
+                throw new Error('Invalid generated message');
+            }
+        }
+        catch {
+            const s = this.read(id, owner);
+            if (s.phase === 'GENERATING' && s.epoch === epoch) {
+                s.phase = 'DRAFTING';
+                s.outcome = 'AI drafting failed. No email sent; inspect AI configuration or try Follow-up again deliberately.';
+                this.store.put(s);
+            }
+            return s;
+        }
+        let pending;
+        this.store.transaction(() => {
+            const s = this.read(id, owner);
+            // Cancel, correction, expiry, or a new conversation invalidates this result.
+            if (s.phase !== 'GENERATING' || s.epoch !== epoch || !s.confirmed || s.recipient !== snapshot.recipient)
+                return;
+            if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
+                s.phase = 'DRAFTING';
+                s.outcome = 'Live sending configuration changed. No email sent.';
+                this.store.put(s);
+                return;
+            }
+            s.draft = { ...draft, version: snapshot.revision + 1 };
+            const message = { ...s.draft, recipient: s.recipient };
+            // Historical API field name; here content is frozen by the explicit send gesture,
+            // not by message review. Recipient/Calendly/dispatch remain controlled by code.
+            s.approved = { ...message, digest: hash(JSON.stringify(message)) };
+            const identity = `${s.id}:${s.approved.digest}`;
+            s.outboxId = identity;
+            s.phase = this.config.live ? 'SENDING' : 'DRY_RUN';
+            s.outcome = this.config.live ? 'Sending the generated email through Gmail…' : 'AI email generated in dry-run mode. No email sent.';
+            this.store.db.prepare('INSERT INTO outbox(id,session_id,digest,status,created) VALUES (?,?,?,?,?)')
+                .run(identity, s.id, s.approved.digest, s.phase, this.now());
+            this.store.put(s);
+            if (this.config.live)
+                pending = { identity, recipient: s.recipient, subject: s.approved.subject, body: s.approved.body };
+        });
+        if (pending)
+            await this.dispatch(id, owner, pending);
+        return this.read(id, owner);
+    }
+    async dispatch(id, owner, pending) {
+        // Committed SENDING before I/O. No retry on transport/provider ambiguity.
+        let result;
+        try {
+            result = await this.sender.send(pending);
+        }
+        catch {
+            result = { status: 'UNKNOWN', detail: 'Provider outcome unknown; inspect Gmail Sent. Do not resend.' };
+        }
+        this.store.transaction(() => {
+            const s = this.store.get(id, owner);
+            if (!s.outboxId)
+                throw new Fault('Send identity missing');
+            this.store.db.prepare('UPDATE outbox SET status=?,provider_id=? WHERE id=?').run(result.status, result.providerId ?? null, s.outboxId);
+            s.phase = result.status;
+            s.outcome = result.detail;
+            s.arm = null;
+            this.store.put(s);
+        });
     }
     end(id, owner) {
         const s = this.store.get(id, owner);

@@ -25,6 +25,8 @@ struct FollowUpSession: Codable, Sendable {
 struct Envelope: Codable, Sendable {
   let session: FollowUpSession; let pages: [String]; let cue: String
   let serverNow: Double?
+  let oneTapEnabled: Bool?
+  let aiConfigured: Bool?
   var transportElapsedMs: Double?
 }
 struct CapturedText: Sendable {
@@ -37,6 +39,22 @@ struct CapturedText: Sendable {
 enum FollowUpFailure: LocalizedError {
   case message(String)
   var errorDescription: String? { if case let .message(s) = self { s } else { nil } }
+}
+enum SDKStartupResult<Model> {
+  case ready(Model)
+  case blocked(String)
+}
+@MainActor enum SDKStartup {
+  // The model factory may read Wearables.shared, so it must never run after
+  // configure fails. Keep this boundary injectable for the regression tests.
+  static func start<Model>(configure: () throws -> Void, makeModel: () -> Model) -> SDKStartupResult<Model> {
+    do {
+      try configure()
+      return .ready(makeModel())
+    } catch {
+      return .blocked(error.localizedDescription)
+    }
+  }
 }
 enum CueGuard {
   static func normalized(_ phrase: String) -> String {

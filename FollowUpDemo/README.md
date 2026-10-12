@@ -1,6 +1,6 @@
 # Follow-up native iPhone demo
 
-This is an implementation kit adapted from Meta’s official **iOS DisplayAccess** sample. The TypeScript backend has been compiled and tested on Windows. **The iOS app has not been compiled, simulated, installed, or tested on real glasses.** See `STATUS.md` and `TEST_RESULTS.md` before treating it as a rehearsable demo.
+This is an implementation kit adapted from Meta’s official **iOS DisplayAccess** sample. The backend compiles and **34 automated tests pass** on Windows. The user reports successful simulator launch, physical iPhone 17 Pro Max installation, text on the paired Ray-Ban Meta Display glasses and transcript visible on the phone. Counter callbacks, two-person intelligibility and operation with the phone locked remain unconfirmed. The new one-tap app changes are written and syntax-checked, but have not been compiled or installed on the Mac/iPhone. See `STATUS.md` and `TEST_RESULTS.md` for the evidence boundaries.
 
 The separate promotional video is outside this app. The configured booking link is [Arnav’s 30 Minute Meeting](https://calendly.com/arnavnambiar981/30min), verified against the connected Calendly account on October 12, 2026. No availability, booking, or schedule was changed.
 
@@ -16,7 +16,17 @@ SIMULATOR_ID=<uuid> bash scripts/mac-check.sh
 
 The script records actual build and test logs in `build-evidence/`; it stops on failure. In Xcode, select your Apple signing team for the app and test targets, change `com.arnav.followup.demo` if needed, connect and trust your iPhone, enable iPhone Developer Mode, select the iPhone and Run. Apple sign-in, agreements, device trust and signing authorization are actions you perform. Record any exact signing/capability error; free Personal Team compatibility is not assumed.
 
-Then pair/update the glasses and Meta AI, enable **Meta AI > Settings > your glasses > Developer Mode**, launch Follow-up and register it through Meta AI. Registration of this app can replace another developer-mode DAT integration. Approve Bluetooth/local-network access and the microphone permission only when beginning consented capture. Use the app’s update actions if Meta reports a firmware or DAT glasses app mismatch. `docs/HARDWARE_TEST.md` describes the required physical tests.
+Simulator builds use **ad-hoc signing** (`CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-"`). Keep signing enabled: Meta's SDK initialization performs keychain operations even on the simulator. If SDK configuration fails, the app displays the error instead of accessing an unconfigured SDK and crashing.
+
+Then pair/update the glasses and Meta AI. In **Meta AI > Settings > App Info**, tap the app version number **five times**, then enable Developer Mode. App Info may be under App settings. Launch Follow-up and register it through Meta AI. Registration of this app can replace another developer-mode DAT integration. Approve Bluetooth/local-network access and the microphone permission when beginning consented capture. Use the app’s update actions if Meta reports a firmware or DAT glasses app mismatch. `docs/HARDWARE_TEST.md` describes the physical tests.
+
+## Current requested send flow
+
+Arnav explicitly changed the send interaction: **Follow-up generates an AI-written email and sends it without message review**. Start conversation, obtain consent to transcription and AI drafting, confirm the full literal recipient once, and capture finalized notes. With `ENABLE_ONE_TAP_FOLLOWUP=true` and a private server `OPENAI_API_KEY`, the glasses show **Follow-up**. That explicit gesture freezes the current finalized transcript, starts the drafting agent and returns immediately with progress. When generation succeeds, the server dispatches the generated message once. Repeated presses share the same job/outbox. Cancel, a recipient correction or a new conversation before dispatch invalidates a pending AI result. After Gmail dispatch begins, cancellation cannot recall the email.
+
+The original complete-review/arm/spoken-cue route remains available as an optional interaction. Its fresh HFP-audio restriction still applies. A deliberate button gesture can use Meta Speech or HFP; it does not require a speech timestamp. Both modes retain live-off defaults, literal recipient confirmation, hardware verification, a limited recipient allowlist and durable no-retry behavior after an ambiguous Gmail result.
+
+The drafting agent uses OpenAI Responses structured output with the configurable default `gpt-4.1-mini-2025-04-14`. It has no email or account tools. Code validates source IDs and exact evidence quotes, supplies the booking link/signature, and controls the recipient and Gmail dispatch. A matching source quote does not by itself prove every generated paraphrase is correct. Final drafting uses up to the retained 100 finalized segments, bounded to 36,000 recent text characters. One small real API validation using synthetic notes passed in 2,796 ms; this is not a guaranteed latency or a real conversation evaluation. No Gmail call was made. AI generation is billable even in email dry-run mode.
 
 ## What is implemented
 
@@ -26,7 +36,7 @@ Then pair/update the glasses and Meta AI, enable **Meta AI > Settings > your gla
 - Server-side **Gmail API** dispatch, encrypted SQLite session records and durable outbox, authenticated/rate-limited endpoints and session isolation. `DRY_RUN`, Gmail acceptance and `UNKNOWN` outcomes are distinct. Ambiguous Gmail requests are never automatically retried.
 - Experimental `LaunchApp` listener and acknowledgement, separate from operating an already-connected display. App-picker launch, cold launch, locked launch and force-quit launch have no pass claim.
 
-Drafting currently uses the latest three finalized transcript **excerpts**, explicitly marks unidentified speakers, and deterministically includes the Calendly URL. It uses no paid model API and makes no inferred promises, ROI, prospect names or agreed appointment times. Semantic AI summarization and diarization are not configured. The recipient is entered during setup as an explicit typed fallback and verified on the glasses; speech-spelling recipient entry is not implemented.
+During listening, the evolving preview uses the latest three finalized transcript excerpts. Pressing Follow-up replaces it with the agent-written email from the bounded retained transcript and starts sending, according to Arnav's chosen no-review flow. AI calls are made on that gesture rather than on every partial or transcript update. Speaker identity/diarization is not configured. The recipient is entered during setup and verified on the glasses; speech-spelling recipient entry is not implemented.
 
 ## Backend and Gmail boundary
 
