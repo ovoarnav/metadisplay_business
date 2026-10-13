@@ -1,0 +1,24 @@
+# Use the installed iPhone app with server-side email logic
+
+Arnav is using **Capture diagnostic**. That mode keeps transcript text on the phone and never calls the backend. The installed app already includes a separate email-conversation mode that uploads finalized text with consent, an authenticated session, the selected capture source and a confirmed literal recipient. No Xcode build is required to use that existing mode. Start a fresh conversation; old diagnostic text is not uploaded automatically.
+
+Arnav chose to reuse **Review** as the generate-and-send gesture. With `LEGACY_REVIEW_FOLLOWUP=true` and `ENABLE_ONE_TAP_FOLLOWUP=true`, the backend accepts the installed app's `/review` request as Follow-up. It generates the email on the server, adds the fixed Calendly link and performs one Gmail dispatch when live gates are enabled. The installed button still says Review. This compatibility mode replaces message review/arm on that endpoint; set the flag false to restore the original reviewed cue route. The updated app's dedicated Follow-up endpoint still works.
+
+The installed app polls SENDING but does not understand GENERATING. The server stores the actual GENERATING phase and exposes it as SENDING only for sessions started through this compatibility route, with the explicit outcome text **Writing your email ... Gmail has not been contacted**. A delayed capture callback cannot change the frozen notes. End / clear before dispatch cancels the job. After dispatch begins it cannot recall email. Failures use a terminal phase the old client understands; repeated presses never redispatch an ambiguous outbox.
+
+## Actions on the existing iPhone app
+
+1. On the glasses, stop **Capture diagnostic**. Keep the display connected.
+2. In the phone's **Setup before the conversation**, enter backend URL `https://followup-backend-production.up.railway.app`. In Railway's existing Follow-up Demo project, open **Project Settings > Shared Variables > production**, reveal/copy `APP_AUTH_TOKEN` privately to the app's **Device access token**, then select **Save backend setup**. Do not copy OpenAI, Gmail or encryption secrets to the phone.
+3. Enter one consenting test recipient's full literal email address. Both people must consent to transcription and server-side AI drafting; enable the consent toggle. Choose physical Meta Speech or the explicitly selected glasses HFP path. The existing consent label mentions transcription; explain AI drafting verbally as well.
+4. On the glasses select **Start follow-up** (or Start conversation if using the newer app), then **Confirm recipient**. Speak a short, fresh test conversation. The phone should show **DRAFTING** and a session ID under Capture and session diagnostics. This is the email-conversation mode, not Capture diagnostic.
+5. Press **Review**. It now triggers generation and the send flow directly. In the current live-off setup, expect a writing-status message followed by **DRY_RUN**, the recipient and generated subject. The old app displays a receipt; it does not add the newer dedicated Follow-up button or new email-body inspection UI. The final generated body is retained server-side and available in the authenticated session response.
+6. If AI fails, expect **FAILED** with **No email sent**. End / clear, check the server configuration, and start a new conversation. For network uncertainty, use Check status on the same session before reset. There is no offline send queue or automatic retry.
+
+## Gmail without a Mac
+
+Gmail authorization can be completed on this **Windows computer** using its installed Node 24 runtime and a browser. Xcode is not involved. The Google Cloud and OAuth procedure in BACKEND_SETUP.md applies; create a Web application client for the callback `http://127.0.0.1:8765/callback`, then run the localhost consent helper privately on Windows. The helper's `.env` contains only the Google client settings/intended sender; the hosted device and encryption keys remain unchanged. Authorize the intended Google account yourself. No email is sent by the helper. Put the resulting Gmail credentials into the existing Railway service's private Variables.
+
+Keep `ALLOW_LIVE_EMAIL=false` and `HARDWARE_CAPTURE_VERIFIED=false` while testing. A useful two-person capture and five-minute locked/pocketed run with the debugger disconnected remain required physical checks. Choose an allowlisted consenting recipient for one live Gmail rehearsal afterward. The old Capture diagnostic success does not prove uploading, sending, useful capture of both people or phone-lock behavior.
+
+This is a backend-only compatibility change. Tests simulate the installed client's HTTP protocol; the new behavior has not yet been exercised by Arnav's installed binary or real glasses. Current deployment evidence is in STATUS.md.

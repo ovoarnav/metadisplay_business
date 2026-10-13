@@ -1,0 +1,12 @@
+Observed October 12, 2026 local time, Windows Node v24.19.0.
+TypeScript 7.0.2 compilation: exit 0; stdout empty.
+Command: node --test test/*.test.ts
+38 tests; 38 pass; 0 fail; duration_ms 1144.2004.
+
+Added cases passed:
+- Legacy Review route accepts asynchronously, exposes progress understood by the installed client, freezes notes, and shares one job/outbox across repeated presses.
+- Legacy mode is opt-in; normal review and the modern Follow-up route remain unchanged when applicable.
+- End cancels pending generation; recipient and finalized-note prerequisites remain enforced.
+- Legacy generation failure reports a known terminal phase with no outbox/provider call.
+
+Provider transports are fake in this suite. No new iOS binary was compiled, installed or tested on glasses. The installed-client Swift source was inspected for protocol/control compatibility. Physical conversation upload and the Review gesture remain untested until Arnav performs them.

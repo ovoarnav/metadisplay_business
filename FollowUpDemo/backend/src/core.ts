@@ -13,8 +13,9 @@ export type Session = {
   revision: number; epoch: string; lastSequence: number; source: Source;
   reviewPage: number; arm: { epoch: string; minCaptureMs: number; deadline: number } | null;
   created: number; expires: number; outcome: string; outboxId: string | null;
+  legacyReviewFlow?: boolean;
 };
-export type Config = { cue: string; live: boolean; allowlist: string[]; hardwareVerified: boolean; oneTap?: boolean };
+export type Config = { cue: string; live: boolean; allowlist: string[]; hardwareVerified: boolean; oneTap?: boolean; legacyReviewFollowup?: boolean };
 export type Drafter = { draft: (segments: Segment[], version: number) => Promise<Draft> };
 export type ProviderOutcome = { status: 'SENT' | 'FAILED' | 'UNKNOWN'; detail: string; providerId?: string };
 export type Sender = { send: (message: { recipient: string; subject: string; body: string; identity: string }) => Promise<ProviderOutcome> };
@@ -195,7 +196,7 @@ export class Controller {
     if (pending) await this.dispatch(id, owner, pending);
     return this.read(id, owner);
   }
-  followup(id: string, owner: string): Session {
+  followup(id: string, owner: string, legacyReviewFlow = false): Session {
     let snapshot: Session | undefined;
     const state = this.store.transaction(() => {
       const s = this.read(id, owner);
@@ -209,7 +210,7 @@ export class Controller {
       if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
         throw new Fault('Live Follow-up needs verified physical capture/display and an allowlisted test recipient.');
       }
-      s.phase = 'GENERATING'; s.arm = null; s.epoch = randomUUID();
+      s.phase = 'GENERATING'; s.arm = null; s.epoch = randomUUID(); s.legacyReviewFlow = legacyReviewFlow;
       s.outcome = 'Writing the email from finalized conversation notes…';
       this.store.put(s); snapshot = structuredClone(s); return s;
     });
@@ -239,7 +240,10 @@ export class Controller {
     } catch {
       const s = this.read(id, owner);
       if (s.phase === 'GENERATING' && s.epoch === epoch) {
-        s.phase = 'DRAFTING'; s.outcome = 'AI drafting failed. No email sent; inspect AI configuration or try Follow-up again deliberately.';
+        s.phase = snapshot.legacyReviewFlow ? 'FAILED' : 'DRAFTING';
+        s.outcome = snapshot.legacyReviewFlow
+          ? 'AI drafting failed. No email sent. End / clear, check the backend configuration, and start a new conversation.'
+          : 'AI drafting failed. No email sent; inspect AI configuration or try Follow-up again deliberately.';
         this.store.put(s);
       }
       return s;
@@ -260,6 +264,7 @@ export class Controller {
       const identity = `${s.id}:${s.approved.digest}`;
       s.outboxId = identity; s.phase = this.config.live ? 'SENDING' : 'DRY_RUN';
       s.outcome = this.config.live ? 'Sending the generated email through Gmail…' : 'AI email generated in dry-run mode. No email sent.';
+      if (s.legacyReviewFlow) s.outcome += `\nTo: ${s.recipient}\nSubject: ${s.draft.subject}`;
       this.store.db.prepare('INSERT INTO outbox(id,session_id,digest,status,created) VALUES (?,?,?,?,?)')
         .run(identity, s.id, s.approved.digest, s.phase, this.now());
       this.store.put(s);

@@ -11,8 +11,16 @@ export function makeServer(controller, token) {
         throw new Error('Provision APP_AUTH_TOKEN with at least 32 random characters.');
     const owner = createHash('sha256').update(token).digest('hex');
     const buckets = new Map();
-    const envelope = (session) => ({ session, pages: pages(session), cue: controller.config.cue,
-        serverNow: controller.now(), oneTapEnabled: controller.config.oneTap === true, aiConfigured: controller.drafter != null });
+    const envelope = (session) => ({
+        // The installed client polls SENDING, but does not know the new GENERATING phase.
+        // Persist the real phase; this transport alias is limited to sessions using Review.
+        session: session.legacyReviewFlow && session.phase === 'GENERATING'
+            ? { ...session, phase: 'SENDING', outcome: 'Writing your email from captured notes. Gmail has not been contacted. End / clear cancels before dispatch.' }
+            : session,
+        pages: pages(session), cue: controller.config.cue,
+        serverNow: controller.now(), oneTapEnabled: controller.config.oneTap === true, aiConfigured: controller.drafter != null,
+        legacyReviewFollowup: controller.config.legacyReviewFollowup === true
+    });
     return createServer(async (req, res) => {
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Cache-Control', 'no-store');
@@ -21,7 +29,8 @@ export function makeServer(controller, token) {
         if (req.url === '/health' && req.method === 'GET') {
             reply(200, { ok: true, provider: 'gmail', liveSending: controller.config.live,
                 oneTapEnabled: controller.config.oneTap === true, aiConfigured: controller.drafter != null,
-                hardwareCaptureVerified: controller.config.hardwareVerified });
+                hardwareCaptureVerified: controller.config.hardwareVerified,
+                legacyReviewFollowup: controller.config.legacyReviewFollowup === true });
             return;
         }
         const supplied = req.headers.authorization?.replace(/^Bearer /, '') ?? '';
@@ -73,6 +82,10 @@ export function makeServer(controller, token) {
                 reply(202, envelope(controller.followup(id, owner)));
                 return;
             }
+            if (req.method === 'POST' && action === 'review' && controller.config.legacyReviewFollowup === true) {
+                reply(202, envelope(controller.followup(id, owner, true)));
+                return;
+            }
             const s = req.method === 'GET' && !action ? controller.read(id, owner)
                 : req.method === 'DELETE' && !action ? controller.end(id, owner)
                     : req.method === 'POST' && action === 'segment' ? await controller.segment(id, owner, input)
@@ -96,7 +109,7 @@ export function run() {
     const store = new Store(path, Buffer.from(env.DATA_ENCRYPTION_KEY, 'hex'));
     const controller = new Controller(store, { cue: env.SEND_CUE ?? DEFAULT_SEND_CUE, live: env.ALLOW_LIVE_EMAIL === 'true',
         allowlist: (env.TEST_RECIPIENT_ALLOWLIST ?? '').split(',').map(s => s.trim()).filter(Boolean), hardwareVerified: env.HARDWARE_CAPTURE_VERIFIED === 'true',
-        oneTap: env.ENABLE_ONE_TAP_FOLLOWUP === 'true' }, new GmailSender({ clientId: env.GOOGLE_CLIENT_ID ?? '', clientSecret: env.GOOGLE_CLIENT_SECRET ?? '', refreshToken: env.GOOGLE_REFRESH_TOKEN ?? '', sender: env.GMAIL_SENDER ?? '' }), Date.now, env.OPENAI_API_KEY ? new OpenAIDrafter(env.OPENAI_API_KEY, env.OPENAI_MODEL || DEFAULT_DRAFT_MODEL) : undefined);
+        oneTap: env.ENABLE_ONE_TAP_FOLLOWUP === 'true', legacyReviewFollowup: env.LEGACY_REVIEW_FOLLOWUP === 'true' }, new GmailSender({ clientId: env.GOOGLE_CLIENT_ID ?? '', clientSecret: env.GOOGLE_CLIENT_SECRET ?? '', refreshToken: env.GOOGLE_REFRESH_TOKEN ?? '', sender: env.GMAIL_SENDER ?? '' }), Date.now, env.OPENAI_API_KEY ? new OpenAIDrafter(env.OPENAI_API_KEY, env.OPENAI_MODEL || DEFAULT_DRAFT_MODEL) : undefined);
     const server = makeServer(controller, env.APP_AUTH_TOKEN ?? '');
     server.listen(Number(env.PORT ?? 8080), env.HOST ?? '127.0.0.1', () => {
         const address = server.address();

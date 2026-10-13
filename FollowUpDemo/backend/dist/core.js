@@ -268,7 +268,7 @@ export class Controller {
             await this.dispatch(id, owner, pending);
         return this.read(id, owner);
     }
-    followup(id, owner) {
+    followup(id, owner, legacyReviewFlow = false) {
         let snapshot;
         const state = this.store.transaction(() => {
             const s = this.read(id, owner);
@@ -288,6 +288,7 @@ export class Controller {
             s.phase = 'GENERATING';
             s.arm = null;
             s.epoch = randomUUID();
+            s.legacyReviewFlow = legacyReviewFlow;
             s.outcome = 'Writing the email from finalized conversation notes…';
             this.store.put(s);
             snapshot = structuredClone(s);
@@ -321,8 +322,10 @@ export class Controller {
         catch {
             const s = this.read(id, owner);
             if (s.phase === 'GENERATING' && s.epoch === epoch) {
-                s.phase = 'DRAFTING';
-                s.outcome = 'AI drafting failed. No email sent; inspect AI configuration or try Follow-up again deliberately.';
+                s.phase = snapshot.legacyReviewFlow ? 'FAILED' : 'DRAFTING';
+                s.outcome = snapshot.legacyReviewFlow
+                    ? 'AI drafting failed. No email sent. End / clear, check the backend configuration, and start a new conversation.'
+                    : 'AI drafting failed. No email sent; inspect AI configuration or try Follow-up again deliberately.';
                 this.store.put(s);
             }
             return s;
@@ -348,6 +351,8 @@ export class Controller {
             s.outboxId = identity;
             s.phase = this.config.live ? 'SENDING' : 'DRY_RUN';
             s.outcome = this.config.live ? 'Sending the generated email through Gmail…' : 'AI email generated in dry-run mode. No email sent.';
+            if (s.legacyReviewFlow)
+                s.outcome += `\nTo: ${s.recipient}\nSubject: ${s.draft.subject}`;
             this.store.db.prepare('INSERT INTO outbox(id,session_id,digest,status,created) VALUES (?,?,?,?,?)')
                 .run(identity, s.id, s.approved.digest, s.phase, this.now());
             this.store.put(s);
