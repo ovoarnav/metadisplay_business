@@ -1,0 +1,11 @@
+**/node_modules/
+**/.env
+**/.env.*
+!**/.env.example
+**/.data/
+**/*.sqlite*
+**/credentials*
+**/build-evidence/
+**/DerivedData/
+**/xcuserdata/
+**/*.xcuserstate

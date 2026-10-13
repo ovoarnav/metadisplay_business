@@ -1,0 +1,18 @@
+{
+  "checkedAt": "2026-10-13T00:14:53.330Z",
+  "deploymentId": "86c5dccd-5ed6-428a-b938-0e878c155b0d",
+  "commitSha": "376836282c1db390009ed96082cd8d4712b35198",
+  "base": "https://followup-backend-production.up.railway.app",
+  "health": {"ok":true,"provider":"gmail","liveSending":false,"oneTapEnabled":true,"aiConfigured":true,"hardwareCaptureVerified":false},
+  "unauthenticatedRequest":401,
+  "acceptanceStatus":202,
+  "phase":"DRY_RUN",
+  "latencyMs":3345,
+  "sessionId":"59dc3a89-5973-4412-9a21-3c8e733f44c4",
+  "duplicatePress":"same outbox",
+  "subject":"Following Up on Our Conversation",
+  "calendly":"https://calendly.com/arnavnambiar981/30min",
+  "gmailCalled":false,
+  "input":"synthetic notes only; no real conversation",
+  "limitations":"Faithfulness of all generated paraphrases, Gmail authorization, inbox delivery, physical capture and volume recovery across a deployment are untested."
+}

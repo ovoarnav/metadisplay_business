@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "model": "gpt-4.1-mini-2025-04-14",
+  "latencyMs": 2796,
+  "syntheticOnly": true,
+  "gmailCalls": 0,
+  "subject": "Following Up on Our Recent Discussion",
+  "body": "Hi,\n\nThanks for the conversation.\n\nI wanted to follow up on our recent conversation regarding the missed follow-ups. As we noted, there is currently no agreed purchase, price, or meeting time in place.\n\nPlease feel free to reach out if you would like to continue our discussion or schedule another conversation at your convenience.\n\nIf you would like to continue the discussion, choose a time here:\nhttps://calendly.com/arnavnambiar981/30min\n\nBest,\nArnav",
+  "evidenceIds": [
+    "synthetic-1"
+  ]
+}
