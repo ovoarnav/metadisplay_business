@@ -57,7 +57,17 @@ Configure any required Voice Invocations capability approval and spoken app name
 | App explicitly force quit | UNTESTED | |
 | Phone-started session, then all operating controls on glasses | UNTESTED | |
 
-## Gates 2 and 3: draft, review and dry-run cue
+## Current flow: one-tap AI Follow-up, without message review
+
+Arnav explicitly requested generation and sending immediately after pressing Follow-up, without reviewing the generated message. This supersedes mandatory message review for the button route. Keep live sending false for initial testing. Install the new native patch, configure the private server OpenAI key and `ENABLE_ONE_TAP_FOLLOWUP=true`, save the backend URL/token on the phone, enter the literal recipient and obtain both participants' consent to transcription and AI drafting.
+
+On glasses, choose Start conversation, confirm the literal address, alternate finalized statements, then choose Follow-up. Expect Writing your email, followed by DRY_RUN. Check the generated message, recipient and Calendly URL afterward. No Gmail call occurs in dry-run; the OpenAI generation itself is billable. Repeat button presses, cancel while writing, correct the recipient, and start a new conversation while an AI result is pending. Expect one job/outbox for repeated presses and no dispatch of cancelled/stale results. Test interruptions and lock-state operation separately.
+
+After all physical capture/display/locked-phone checks pass, authorize Gmail and configure one consenting test recipient in the allowlist. Enabling live sending makes the Follow-up button generate and send automatically; no message-review step or spoken cue follows that gesture. Confirm Gmail acceptance, Sent and inbox separately. UNKNOWN still requires private Sent inspection and has no automatic retry.
+
+The agent has verified one real OpenAI call with synthetic notes, not this hardware flow. Generation latency varies; one synthetic call took 2,796 ms. Text rendering and phone transcript are user-reported; two-person/locked-phone and new button interaction remain untested.
+
+## Optional original route: draft, review and dry-run cue
 
 After Gate 1, deploy the server over HTTPS with a persistent volume. The configured cue is **“I just realized I haven't shown you how good I am as a developer”**; verify that the glasses show this full sentence. Leave live sending false. Save the backend URL and device token in phone setup, enter a consenting test recipient’s literal address (typed fallback), and set consent before the conversation.
 

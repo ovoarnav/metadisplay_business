@@ -1,0 +1,7 @@
+**
+!Dockerfile.followup
+!FollowUpDemo/
+!FollowUpDemo/backend/
+!FollowUpDemo/backend/package.json
+!FollowUpDemo/backend/src/
+!FollowUpDemo/backend/src/**

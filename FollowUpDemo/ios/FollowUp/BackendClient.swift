@@ -24,6 +24,11 @@ enum DemoKeychain {
 @MainActor
 final class BackendClient {
   var baseURL: URL?
+  var isConfigured: Bool {
+    guard let baseURL, baseURL.scheme == "https", baseURL.host != nil,
+      baseURL.user == nil, baseURL.password == nil, let token = DemoKeychain.read() else { return false }
+    return token.count >= 32
+  }
   func request(_ path: String, method: String = "POST", body: [String: Any] = [:]) async throws -> Envelope {
     guard let baseURL, baseURL.scheme == "https", baseURL.user == nil, baseURL.password == nil,
       let token = DemoKeychain.read(), token.count >= 32 else {

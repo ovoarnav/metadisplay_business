@@ -14,6 +14,26 @@ import MWDATMockDevice
 }
 @Suite(.serialized) @MainActor
 struct FollowUpTests {
+  @Test func failedConfigurationNeverConstructsSDKDependentModel() {
+    var modelCreations = 0
+    let result = SDKStartup.start(configure: {
+      throw FollowUpFailure.message("Keychain initialization failed")
+    }, makeModel: { modelCreations += 1; return "model" })
+    #expect(modelCreations == 0)
+    if case let .blocked(message) = result {
+      #expect(message == "Keychain initialization failed")
+    } else {
+      Issue.record("Configuration failure must block startup.")
+    }
+  }
+  @Test func successfulConfigurationConstructsModelOnlyAfterConfigure() {
+    var events: [String] = []
+    let result = SDKStartup.start(configure: { events.append("configure") },
+      makeModel: { events.append("model"); return "ready" })
+    #expect(events == ["configure", "model"])
+    if case let .ready(model) = result { #expect(model == "ready") }
+    else { Issue.record("Successful configuration must allow startup.") }
+  }
   @Test func cueRequiresFinalNewEpochAndFullPhrase() {
     let phrase = "I just realized I haven't shown you how good I am as a developer"
     let valid = CapturedText(text: phrase, final: true, epoch: "fresh", capturedMs: 11, confidence: nil)
@@ -32,7 +52,8 @@ struct FollowUpTests {
     #expect(e.session.arm == nil)
   }
   @Test func officialMockDisplayAndSpeechShareOneSession() async throws {
-    try? Wearables.configure()
+    do { try Wearables.configure() }
+    catch WearablesError.alreadyConfigured { }
     let kit = MockDeviceKit.shared
     kit.enable()
     let glasses = try kit.pairGlasses(model: .metaRayBanDisplay)

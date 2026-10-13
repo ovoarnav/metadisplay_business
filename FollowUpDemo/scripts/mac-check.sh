@@ -23,14 +23,14 @@ xcodebuild -list -project ios/DisplayAccess.xcodeproj | tee build-evidence/xcode
 xcodebuild -resolvePackageDependencies -project ios/DisplayAccess.xcodeproj -scheme DisplayAccess | tee build-evidence/package-resolution.txt
 xcodebuild -project ios/DisplayAccess.xcodeproj -scheme DisplayAccess \
   -destination 'generic/platform=iOS Simulator' -derivedDataPath build-evidence/DerivedData \
-  CODE_SIGNING_ALLOWED=NO build | tee build-evidence/simulator-build.txt
+  CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-" clean build | tee build-evidence/simulator-build.txt
 # Pick a simulator UUID printed by simctl. Avoid assuming an installed iPhone name.
 if [[ -n "${SIMULATOR_ID:-}" ]]; then
   xcodebuild -project ios/DisplayAccess.xcodeproj -scheme DisplayAccess \
     -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
     -derivedDataPath build-evidence/DerivedData \
     -resultBundlePath "build-evidence/native-tests-$(date -u +%Y%m%dT%H%M%SZ).xcresult" \
-    CODE_SIGNING_ALLOWED=NO test | tee build-evidence/native-tests.txt
+    CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY="-" test | tee build-evidence/native-tests.txt
 else
   printf '%s\n' 'Simulator build done. Set SIMULATOR_ID to an available UUID and rerun to execute tests.'
 fi

@@ -124,6 +124,7 @@ final class FollowUpModel {
   }
   func begin() {
     guard !busy, envelope == nil, !diagnosticRunning, consent, display.isConnected else { notice = "Connect display, stop diagnostics, obtain consent, then Start on the glasses."; return }
+    guard api.isConfigured else { notice = "Save the deployed HTTPS backend URL and its device token before starting the email conversation. Counter and capture diagnostics need no backend."; return }
     busy = true; generation = UUID(); captureNonce = UUID(); localDisarmed = true
     partial = ""; finalTranscript = []; pageIndex = 0; sequence = 0; hfp.sessionOrigin = HFPCapture.hostSeconds
     let nonce = generation
@@ -193,6 +194,7 @@ final class FollowUpModel {
   func action(_ action: String) {
     if action == "counter" { counter += 1; requestRender(); return }
     if action == "start" { begin(); return }
+    if action == "followup" { generateAndSend(); return }
     if action == "diag" { Task { await beginDiagnostic() }; return }
     if action == "diag-stop" { diagnosticRunning = false; stopCapture(); requestRender(); return }
     if action == "stop" { end(); return }
@@ -226,6 +228,26 @@ final class FollowUpModel {
         }
         await self.renderNow()
       } catch { self.notice = error.localizedDescription; self.localDisarmed = true; self.requestRender() }
+    }
+  }
+  private func generateAndSend() {
+    guard !busy, let e = envelope, e.session.phase == "DRAFTING", e.session.confirmed,
+      e.oneTapEnabled == true, e.aiConfigured == true else { return }
+    localDisarmed = true; stopCapture(); busy = true
+    let nonce = generation, id = e.session.id
+    UserDefaults.standard.set(id, forKey: "pendingDispatchID")
+    notice = "Follow-up requested: generate and send without message review. Check status while the server writes the email."
+    enqueue { [weak self] in
+      guard let self else { return }; defer { self.busy = false }
+      guard self.generation == nonce else { return }
+      do {
+        let response = try await self.api.request("sessions/\(id)/followup")
+        guard self.generation == nonce else { return }; self.envelope = response
+        self.requestRender()
+      } catch {
+        self.notice = "\(error.localizedDescription) Check this session’s status; no automatic retry."
+        self.requestRender()
+      }
     }
   }
   func interrupt(_ reason: String) {
@@ -288,7 +310,13 @@ final class FollowUpModel {
         let e = try await self.api.request("sessions/\(s.id)", method: "GET")
         guard self.generation == nonce else { return }
         let oldPhase = self.envelope?.session.phase; self.envelope = e
-        if oldPhase == "ARMED" && e.session.phase != "ARMED" { self.localDisarmed = true; self.stopCapture() }
+        if oldPhase == "GENERATING" && e.session.phase == "DRAFTING" {
+          self.notice = e.session.outcome
+          try await self.startCapture()
+        }
+        if (oldPhase == "ARMED" && e.session.phase != "ARMED") || ["SENT","FAILED","UNKNOWN","DRY_RUN"].contains(e.session.phase) {
+          self.localDisarmed = true; self.stopCapture()
+        }
         self.requestRender()
       } catch { self.notice = "Backend unavailable. Preserve session \(s.id); do not retry a cue or email." }
     }
@@ -313,7 +341,7 @@ final class FollowUpModel {
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(1))
         guard !Task.isCancelled, let self else { return }
-        if self.envelope?.session.phase == "ARMED" || self.envelope?.session.phase == "SENDING" { self.checkStatus() }
+        if let phase = self.envelope?.session.phase, ["ARMED","GENERATING","SENDING"].contains(phase) { self.checkStatus() }
       }
     }
   }
@@ -335,7 +363,7 @@ final class FollowUpModel {
     guard !display.isSending else { requestRender(); return }
     var title = "Follow-up connected", detail = "Interactive counter: \(counter)\nStart only after conversation consent."
     var footer = preview == nil ? "Physical device session; capture unverified" : "MOCK DISPLAY — injected simulation"
-    var actions = [GlassesAction(id: "counter", label: "+1"), GlassesAction(id: "diag", label: "Capture diagnostic"), GlassesAction(id: "start", label: "Start follow-up")]
+    var actions = [GlassesAction(id: "counter", label: "+1"), GlassesAction(id: "diag", label: "Capture diagnostic"), GlassesAction(id: "start", label: "Start conversation")]
     if diagnosticRunning {
       title = "Listening · diagnostic"
       detail = "Counter: \(counter)\n\((partial.isEmpty ? finalTranscript.last ?? "Waiting for speech…" : "Partial: " + partial).suffix(200))"
@@ -358,8 +386,16 @@ final class FollowUpModel {
           pageIndex = min(pageIndex, max(0, chunks.count - 1)); detail = chunks.isEmpty ? "Listening…" : chunks[pageIndex]
           footer += " · Draft v\(s.draft?.version ?? 0) · \(pageIndex + 1)/\(chunks.count)"
           actions = [GlassesAction(id: "draft-back", label: "Previous"), GlassesAction(id: "draft-next", label: "Next"), GlassesAction(id: "review", label: "Review")]
+          if e.oneTapEnabled == true, e.aiConfigured == true, s.draft != nil {
+            actions.insert(GlassesAction(id: "followup", label: "Follow-up"), at: 0)
+            footer += " · Follow-up generates and sends without review"
+          }
         }
         actions += [GlassesAction(id: "pause", label: "Pause"), GlassesAction(id: "stop", label: "Stop")]
+      case "GENERATING":
+        detail = "Writing your email…\nTo: \(s.recipient)\nIt will send automatically when ready."
+        footer += " · \(s.outcome)"
+        actions = [GlassesAction(id: "status", label: "Check status"), GlassesAction(id: "pause", label: "Cancel before sending")]
       case "REVIEW":
         pageIndex = min(pageIndex, max(0, e.pages.count - 1)); detail = e.pages.isEmpty ? "No review content." : e.pages[pageIndex]
         footer += " · Frozen v\(s.approved?.version ?? 0) · Page \(pageIndex + 1)/\(e.pages.count)"

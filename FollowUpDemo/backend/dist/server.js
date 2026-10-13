@@ -5,18 +5,23 @@ import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Controller, Store, Fault, pages, CALENDLY, DEFAULT_SEND_CUE } from './core.js';
 import { GmailSender } from './gmail.js';
+import { OpenAIDrafter, DEFAULT_DRAFT_MODEL } from './drafting.js';
 export function makeServer(controller, token) {
     if (token.length < 32)
         throw new Error('Provision APP_AUTH_TOKEN with at least 32 random characters.');
     const owner = createHash('sha256').update(token).digest('hex');
     const buckets = new Map();
+    const envelope = (session) => ({ session, pages: pages(session), cue: controller.config.cue,
+        serverNow: controller.now(), oneTapEnabled: controller.config.oneTap === true, aiConfigured: controller.drafter != null });
     return createServer(async (req, res) => {
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('X-Content-Type-Options', 'nosniff');
         const reply = (status, value) => { res.writeHead(status); res.end(JSON.stringify(value)); };
         if (req.url === '/health' && req.method === 'GET') {
-            reply(200, { ok: true, provider: 'gmail', liveSending: controller.config.live });
+            reply(200, { ok: true, provider: 'gmail', liveSending: controller.config.live,
+                oneTapEnabled: controller.config.oneTap === true, aiConfigured: controller.drafter != null,
+                hardwareCaptureVerified: controller.config.hardwareVerified });
             return;
         }
         const supplied = req.headers.authorization?.replace(/^Bearer /, '') ?? '';
@@ -57,19 +62,23 @@ export function makeServer(controller, token) {
             }
             if (req.url === '/sessions' && req.method === 'POST') {
                 const s = controller.create(owner, input.consent === true, input.source);
-                reply(201, { session: s, pages: pages(s), cue: controller.config.cue, serverNow: controller.now() });
+                reply(201, envelope(s));
                 return;
             }
             const match = /^\/sessions\/([a-f0-9-]+)(?:\/([a-z]+))?$/.exec(req.url ?? '');
             if (!match?.[1])
                 throw new Fault('Not found', 404);
             const id = match[1], action = match[2];
+            if (req.method === 'POST' && action === 'followup') {
+                reply(202, envelope(controller.followup(id, owner)));
+                return;
+            }
             const s = req.method === 'GET' && !action ? controller.read(id, owner)
                 : req.method === 'DELETE' && !action ? controller.end(id, owner)
                     : req.method === 'POST' && action === 'segment' ? await controller.segment(id, owner, input)
                         : req.method === 'POST' && action ? controller.update(id, owner, action, input)
                             : (() => { throw new Fault('Method not allowed', 405); })();
-            reply(200, { session: s, pages: pages(s), cue: controller.config.cue, serverNow: controller.now() });
+            reply(200, envelope(s));
         }
         catch (e) {
             reply(e instanceof Fault ? e.status : 500, { error: e instanceof Fault ? e.message : 'Internal error; inspect server privately.' });
@@ -86,7 +95,8 @@ export function run() {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     const store = new Store(path, Buffer.from(env.DATA_ENCRYPTION_KEY, 'hex'));
     const controller = new Controller(store, { cue: env.SEND_CUE ?? DEFAULT_SEND_CUE, live: env.ALLOW_LIVE_EMAIL === 'true',
-        allowlist: (env.TEST_RECIPIENT_ALLOWLIST ?? '').split(',').map(s => s.trim()).filter(Boolean), hardwareVerified: env.HARDWARE_CAPTURE_VERIFIED === 'true' }, new GmailSender({ clientId: env.GOOGLE_CLIENT_ID ?? '', clientSecret: env.GOOGLE_CLIENT_SECRET ?? '', refreshToken: env.GOOGLE_REFRESH_TOKEN ?? '', sender: env.GMAIL_SENDER ?? '' }));
+        allowlist: (env.TEST_RECIPIENT_ALLOWLIST ?? '').split(',').map(s => s.trim()).filter(Boolean), hardwareVerified: env.HARDWARE_CAPTURE_VERIFIED === 'true',
+        oneTap: env.ENABLE_ONE_TAP_FOLLOWUP === 'true' }, new GmailSender({ clientId: env.GOOGLE_CLIENT_ID ?? '', clientSecret: env.GOOGLE_CLIENT_SECRET ?? '', refreshToken: env.GOOGLE_REFRESH_TOKEN ?? '', sender: env.GMAIL_SENDER ?? '' }), Date.now, env.OPENAI_API_KEY ? new OpenAIDrafter(env.OPENAI_API_KEY, env.OPENAI_MODEL || DEFAULT_DRAFT_MODEL) : undefined);
     const server = makeServer(controller, env.APP_AUTH_TOKEN ?? '');
     server.listen(Number(env.PORT ?? 8080), env.HOST ?? '127.0.0.1', () => {
         const address = server.address();

@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.data
+node_modules
+dist
+test
+*.sqlite*
+*.log
+credentials*
+.git
