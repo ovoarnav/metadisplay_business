@@ -19,12 +19,15 @@ export function captureRecipient(prior, text, epoch, now) {
     // Incomplete domains never appear as a confirmable address before the end cue.
     let capture = prior && prior.epoch === epoch && now - prior.startedAt <= 90_000 ? structuredClone(prior)
         : { epoch, startedAt: now, fragments: [], started: false };
-    const input = [...capture.fragments, text].join(' ');
+    // Recognizers often add a sentence stop to each final callback. Treat that
+    // boundary as formatting; a spoken "dot" still remains an explicit symbol.
+    const chunk = text.trim().replace(/[.,!?;:]+$/, '');
+    const input = [...capture.fragments, chunk].join(' ');
     const start = /\b(?:my email(?: address)? is|recipient email(?: address)? is)\b/i.exec(input);
     if (start)
         capture = { epoch, startedAt: now, fragments: [input.slice(start.index + start[0].length)], started: true };
     else if (capture.started)
-        capture.fragments.push(text);
+        capture.fragments.push(chunk);
     else
         return { capture: { ...capture, fragments: [input.slice(-160)] } };
     const all = capture.fragments.join(' ');

@@ -1,6 +1,6 @@
 # Follow-up native iPhone demo
 
-This is an implementation kit adapted from Meta’s official **iOS DisplayAccess** sample. The backend compiles and **50 automated tests pass** on Windows. The user reports successful simulator launch, physical iPhone 17 Pro Max installation, text on the paired Ray-Ban Meta Display glasses and transcript visible on the phone. Counter callbacks, two-person intelligibility and operation with the phone locked remain unconfirmed. The new one-tap app changes are written and syntax-checked, but have not been compiled or installed on the Mac/iPhone. See `STATUS.md` and `TEST_RESULTS.md` for the evidence boundaries.
+This is an implementation kit adapted from Meta’s official **iOS DisplayAccess** sample. The backend compiles and **51 automated tests pass** on Windows. The user reports successful simulator launch, physical iPhone 17 Pro Max installation, text on the paired Ray-Ban Meta Display glasses and transcript visible on the phone. Counter callbacks, two-person intelligibility and operation with the phone locked remain unconfirmed. The new one-tap app changes are written and syntax-checked, but have not been compiled or installed on the Mac/iPhone. See `STATUS.md` and `TEST_RESULTS.md` for the evidence boundaries.
 
 The separate promotional video is outside this app. The configured booking link is [Arnav’s 30 Minute Meeting](https://calendly.com/arnavnambiar981/30min), verified against the connected Calendly account on October 12, 2026. No availability, booking, or schedule was changed.
 

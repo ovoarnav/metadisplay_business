@@ -33,6 +33,16 @@ test('ordinary conversation, stale epochs, expired collection and incomplete dom
   assert.equal(captureRecipient(undefined, 'My email is a at gmail. Email complete.', 'epoch', 0).candidate, undefined);
 });
 
+test('sentence punctuation on separate recognition callbacks does not become invented address punctuation', () => {
+  let capture: RecipientCapture | undefined;
+  for (const text of ['My email.', 'is Arnav.', 'Nambiar.', 'Nine eight one at.', 'Gmail dot com.']) {
+    capture = captureRecipient(capture, text, 'epoch', 1000).capture;
+  }
+  assert.equal(captureRecipient(capture, 'Email complete.', 'epoch', 1001).candidate, 'arnavnambiar981@gmail.com');
+  const explicitDot = captureRecipient(undefined, 'My email is a dot b at example dot com. Email complete.', 'epoch', 1000);
+  assert.equal(explicitDot.candidate, 'a.b@example.com');
+});
+
 function fixture(spokenRecipient = true) {
   const store = new Store(':memory:', randomBytes(32));
   const ctl = new Controller(store, { cue: 'cue', live: false, hardwareVerified: false, allowlist: [], oneTap: true, spokenRecipient },
