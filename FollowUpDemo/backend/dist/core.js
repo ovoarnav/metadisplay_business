@@ -1,5 +1,6 @@
 import { randomUUID, createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { captureRecipient, recipientCandidate } from './recipient.js';
 export const CALENDLY = 'https://calendly.com/arnavnambiar981/30min';
 export const DEFAULT_SEND_CUE = "I just realized I haven't shown you how good I am as a developer";
 export class Fault extends Error {
@@ -138,6 +139,8 @@ export class Controller {
                 previous.approved = null;
                 previous.recipient = '';
                 previous.confirmed = false;
+                previous.recipientCapture = undefined;
+                previous.recipientOrigin = undefined;
                 this.store.put(previous);
             }
             const s = { id: randomUUID(), owner, phase: 'DRAFTING', recipient: '', confirmed: false, segments: [], draft: null,
@@ -157,12 +160,16 @@ export class Controller {
                 throw new Fault('Email generation is in progress; pause or cancel before changing the session.');
             switch (action) {
                 case 'recipient':
-                    s.recipient = email(input.recipient);
+                    s.recipient = email(recipientCandidate(input.recipient) ?? input.recipient);
+                    s.recipientOrigin = 'manual';
                     s.confirmed = false;
                     s.approved = null;
                     s.arm = null;
                     s.phase = 'DRAFTING';
                     s.reviewPage = -1;
+                    s.epoch = randomUUID();
+                    s.lastSequence = 0;
+                    s.recipientCapture = undefined;
                     break;
                 case 'confirm':
                     if (input.recipient !== s.recipient || !s.recipient)
@@ -191,6 +198,9 @@ export class Controller {
                     s.approved = null;
                     s.phase = 'DRAFTING';
                     s.reviewPage = -1;
+                    s.epoch = randomUUID();
+                    s.lastSequence = 0;
+                    s.recipientCapture = undefined;
                     break;
                 case 'arm':
                     if (s.phase !== 'REVIEW' || !s.approved || s.reviewPage !== pages(s).length - 1)
@@ -214,6 +224,7 @@ export class Controller {
                     s.phase = 'PAUSED';
                     s.epoch = randomUUID();
                     s.lastSequence = 0;
+                    s.recipientCapture = undefined;
                     break;
                 case 'resume':
                     if (s.phase !== 'PAUSED')
@@ -260,6 +271,20 @@ export class Controller {
                 s.segments.push({ ...input, speaker: ['wearer', 'prospect'].includes(input.speaker) ? input.speaker : 'unknown' });
                 s.segments = s.segments.slice(-100);
                 s.revision++;
+                if (this.config.spokenRecipient && !s.confirmed && (!s.recipient || s.recipientOrigin === 'speech')) {
+                    const result = captureRecipient(s.recipientCapture, input.text, s.epoch, this.now());
+                    s.recipientCapture = result.capture;
+                    if (result.candidate) {
+                        s.recipient = email(result.candidate);
+                        s.recipientOrigin = 'speech';
+                        s.outcome = 'Spoken address assembled. Verify every character on the glasses before confirming.';
+                    }
+                    else if (result.completed || result.capture?.started) {
+                        s.recipient = '';
+                        if (result.completed)
+                            s.outcome = 'Address could not be assembled. Spell it again with a full domain, or type the literal address on the phone.';
+                    }
+                }
                 s.draft = groundedDraft(s.segments, s.revision);
             }
             this.store.put(s);
@@ -268,7 +293,7 @@ export class Controller {
             await this.dispatch(id, owner, pending);
         return this.read(id, owner);
     }
-    followup(id, owner) {
+    followup(id, owner, legacyReviewFlow = false) {
         let snapshot;
         const state = this.store.transaction(() => {
             const s = this.read(id, owner);
@@ -282,12 +307,13 @@ export class Controller {
             if (s.phase !== 'DRAFTING' || !s.confirmed || !s.recipient || !s.segments.some(x => x.final && x.text.trim())) {
                 throw new Fault('Start a conversation, confirm the literal recipient, and capture finalized notes before Follow-up.');
             }
-            if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
+            if (this.config.live && !this.liveFollowupAllowed(s)) {
                 throw new Fault('Live Follow-up needs verified physical capture/display and an allowlisted test recipient.');
             }
             s.phase = 'GENERATING';
             s.arm = null;
             s.epoch = randomUUID();
+            s.legacyReviewFlow = legacyReviewFlow;
             s.outcome = 'Writing the email from finalized conversation notes…';
             this.store.put(s);
             snapshot = structuredClone(s);
@@ -307,6 +333,11 @@ export class Controller {
         return state;
     }
     async waitForFollowup(id) { await this.followupJobs.get(id); }
+    liveFollowupAllowed(s) {
+        if (s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))
+            return false;
+        return this.config.hardwareVerified || (!!this.config.selfTestRecipient && s.recipient === this.config.selfTestRecipient);
+    }
     async generateFollowup(snapshot) {
         const { id, owner, epoch } = snapshot;
         let draft;
@@ -321,8 +352,10 @@ export class Controller {
         catch {
             const s = this.read(id, owner);
             if (s.phase === 'GENERATING' && s.epoch === epoch) {
-                s.phase = 'DRAFTING';
-                s.outcome = 'AI drafting failed. No email sent; inspect AI configuration or try Follow-up again deliberately.';
+                s.phase = snapshot.legacyReviewFlow ? 'FAILED' : 'DRAFTING';
+                s.outcome = snapshot.legacyReviewFlow
+                    ? 'AI drafting failed. No email sent. End / clear, check the backend configuration, and start a new conversation.'
+                    : 'AI drafting failed. No email sent; inspect AI configuration or try Follow-up again deliberately.';
                 this.store.put(s);
             }
             return s;
@@ -333,8 +366,8 @@ export class Controller {
             // Cancel, correction, expiry, or a new conversation invalidates this result.
             if (s.phase !== 'GENERATING' || s.epoch !== epoch || !s.confirmed || s.recipient !== snapshot.recipient)
                 return;
-            if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
-                s.phase = 'DRAFTING';
+            if (this.config.live && !this.liveFollowupAllowed(s)) {
+                s.phase = s.legacyReviewFlow ? 'FAILED' : 'DRAFTING';
                 s.outcome = 'Live sending configuration changed. No email sent.';
                 this.store.put(s);
                 return;
@@ -345,9 +378,12 @@ export class Controller {
             // not by message review. Recipient/Calendly/dispatch remain controlled by code.
             s.approved = { ...message, digest: hash(JSON.stringify(message)) };
             const identity = `${s.id}:${s.approved.digest}`;
+            s.selfTestOnly = this.config.live && !this.config.hardwareVerified && s.recipient === this.config.selfTestRecipient;
             s.outboxId = identity;
             s.phase = this.config.live ? 'SENDING' : 'DRY_RUN';
             s.outcome = this.config.live ? 'Sending the generated email through Gmail…' : 'AI email generated in dry-run mode. No email sent.';
+            if (s.legacyReviewFlow)
+                s.outcome += `\nTo: ${s.recipient}\nSubject: ${s.draft.subject}`;
             this.store.db.prepare('INSERT INTO outbox(id,session_id,digest,status,created) VALUES (?,?,?,?,?)')
                 .run(identity, s.id, s.approved.digest, s.phase, this.now());
             this.store.put(s);
@@ -367,6 +403,8 @@ export class Controller {
         catch {
             result = { status: 'UNKNOWN', detail: 'Provider outcome unknown; inspect Gmail Sent. Do not resend.' };
         }
+        // Provider status only: never log transcripts, email content or credentials.
+        console.info(`Follow-up Gmail outcome: ${result.status}`);
         this.store.transaction(() => {
             const s = this.store.get(id, owner);
             if (!s.outboxId)
@@ -374,6 +412,8 @@ export class Controller {
             this.store.db.prepare('UPDATE outbox SET status=?,provider_id=? WHERE id=?').run(result.status, result.providerId ?? null, s.outboxId);
             s.phase = result.status;
             s.outcome = result.detail;
+            if (s.selfTestOnly)
+                s.outcome += '\nSelf-test to your Gmail account only. Hardware verification is pending.';
             s.arm = null;
             this.store.put(s);
         });
@@ -387,6 +427,8 @@ export class Controller {
         s.approved = null;
         s.recipient = '';
         s.confirmed = false;
+        s.recipientCapture = undefined;
+        s.recipientOrigin = undefined;
         this.store.put(s);
         return s;
     }

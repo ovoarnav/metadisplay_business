@@ -1,8 +1,12 @@
 # Follow-up native iPhone demo
 
-This is an implementation kit adapted from Meta’s official **iOS DisplayAccess** sample. The backend compiles and **34 automated tests pass** on Windows. The user reports successful simulator launch, physical iPhone 17 Pro Max installation, text on the paired Ray-Ban Meta Display glasses and transcript visible on the phone. Counter callbacks, two-person intelligibility and operation with the phone locked remain unconfirmed. The new one-tap app changes are written and syntax-checked, but have not been compiled or installed on the Mac/iPhone. See `STATUS.md` and `TEST_RESULTS.md` for the evidence boundaries.
+This is an implementation kit adapted from Meta’s official **iOS DisplayAccess** sample. The backend compiles and **51 automated tests pass** on Windows. The user reports successful simulator launch, physical iPhone 17 Pro Max installation, text on the paired Ray-Ban Meta Display glasses and transcript visible on the phone. Counter callbacks, two-person intelligibility and operation with the phone locked remain unconfirmed. The new one-tap app changes are written and syntax-checked, but have not been compiled or installed on the Mac/iPhone. See `STATUS.md` and `TEST_RESULTS.md` for the evidence boundaries.
 
 The separate promotional video is outside this app. The configured booking link is [Arnav’s 30 Minute Meeting](https://calendly.com/arnavnambiar981/30min), verified against the connected Calendly account on October 12, 2026. No availability, booking, or schedule was changed.
+
+## Use the installed app without a Mac
+
+Arnav chose the existing **Review** button as the Follow-up trigger. The backend-only compatibility mode accepts that installed client's request, writes the email with AI and enters the send flow. The button label stays Review. Stop Capture diagnostic, save the hosted backend URL/device token, confirm a literal recipient, and start the separate email conversation. Capture diagnostic itself never uploads text. See `docs/NO_MAC_SETUP.md` for exact steps and current deployment evidence in STATUS.md. No app reinstall is needed for this path. Gmail consent and a real refresh test now pass. The first live button test is restricted to Arnav’s own address while hardware checks remain pending; see docs/GMAIL_LIVE_SELF_TEST.md for deployment readiness and exact steps.
 
 ## Next action on your Mac
 
@@ -54,7 +58,7 @@ node --env-file=.env src/server.ts
 
 `SEND_CUE` is configured to Arnav’s exact sentence: **“I just realized I haven't shown you how good I am as a developer”**. It is the server default and is included in `.env.example`; setting an explicitly empty value disables arming. The complete sentence must come from fresh finalized audio while armed; case, ordinary punctuation and straight/curly apostrophe differences are normalized, while extra words and paraphrases are rejected. `ALLOW_LIVE_EMAIL=false` and `HARDWARE_CAPTURE_VERIFIED=false` remain the default. A dry-run cue never calls Gmail.
 
-For a physical phone rehearsal, deploy the container to an authorized host with **HTTPS**, a persistent `/data` volume writable by the container’s `node` user, and a private secret store. Run **one Node process / one replica** for this SQLite demo. Point the phone at that deployed URL, not at localhost or a laptop. `GET /health` provides an actual readiness check. Hosting access, budget and deployment authorization have not been supplied, so no cloud deployment is claimed. See `docs/BACKEND_SETUP.md` for exact Gmail consent and deployment actions.
+For a physical phone rehearsal, deploy the container to an authorized host with **HTTPS**, a writable persistent `/data` volume, and a private secret store. Run **one Node process / one replica** for this SQLite demo. Point the phone at that deployed URL, not at localhost or a laptop. `GET /health` provides an actual readiness check. The authorized Railway deployment is live at `https://followup-backend-production.up.railway.app`. A hosted synthetic AI dry-run passed; Gmail consent and physical acceptance remain open. On Railway the configured root-owned volume uses `RAILWAY_RUN_UID=0`. See `docs/BACKEND_SETUP.md` for exact Gmail consent and deployment actions.
 
 Keep `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `DATA_ENCRYPTION_KEY` and the server configuration private. Enter only the limited demo device bearer token into the phone’s setup; it is stored in Keychain with access after first unlock. Gmail credentials never enter the app. Never upload `.env`, `.data/`, credentials or private recordings with build logs.
 
@@ -74,3 +78,7 @@ Speech and Voice Invocations are experimental in SDK 1.0.1; Meta says apps using
 - `evidence/`: actual Windows build/test/source-check output. Native test source exists; native execution does not.
 
 On unknown dispatch, preserve the session identity, use **Check status / Recover previous dispatch identity**, and inspect Gmail Sent privately. An API message ID means Gmail accepted the request; it does not prove recipient inbox arrival. Phrase matching provides no speaker identity authentication: another person saying the entire phrase while armed remains a physical-demo risk to assess during rehearsal.
+
+## Spoken recipient and better email context
+
+Backend-only spoken-address assembly uses “My email is … Email complete” with full literal confirmation on the existing glasses screen. The drafting agent now extracts supported discussion context before composing in a single API call. Read docs/SPOKEN_RECIPIENT_AND_CONTEXT.md for exact usage, limitations and temporary encrypted transcript retention. The first real hosted email was accepted and the user reports receipt; evidence/gmail-first-live-send.json records that separately from automated/fake-transport tests.

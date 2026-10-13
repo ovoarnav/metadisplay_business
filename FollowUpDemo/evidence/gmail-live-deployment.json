@@ -1,0 +1,21 @@
+{
+  "checkedAt": "2026-10-13T03:15:05.148Z",
+  "deploymentId": "bc519cb5-a4e3-4b24-b094-50a06da6f8e4",
+  "commitSha": "569581d2814f816b6748dcea7ae3d4f1cbf5a772",
+  "base": "https://followup-backend-production.up.railway.app",
+  "status": "SUCCESS",
+  "health": {
+    "ok": true,
+    "provider": "gmail",
+    "liveSending": true,
+    "oneTapEnabled": true,
+    "aiConfigured": true,
+    "hardwareCaptureVerified": false,
+    "liveSelfTestOnly": true,
+    "gmailConfigured": true,
+    "legacyReviewFollowup": true
+  },
+  "unauthenticatedReviewStatus": 401,
+  "liveDispatch": "UNTESTED",
+  "note": "Own-address-only first live test enabled. Gmail consent/refresh passed on Windows. Native app interaction, actual hosted Gmail dispatch/inbox and hardware acceptance are not proven by health."
+}

@@ -1,0 +1,15 @@
+{
+  "deploymentId": "bc519cb5-a4e3-4b24-b094-50a06da6f8e4",
+  "commitSha": "569581d2814f816b6748dcea7ae3d4f1cbf5a772",
+  "recipient": "arnavnambiar981@gmail.com",
+  "providerStatus": "SENT",
+  "providerEvents": [
+    {
+      "timestamp": "2026-10-13T03:18:33.828301170Z",
+      "message": "Follow-up Gmail outcome: SENT"
+    }
+  ],
+  "inboxDelivery": "PASS (user-reported)",
+  "userReport": "SENT and email received",
+  "limits": "Backend provider acceptance observed in runtime log; inbox receipt reported by user. No independent mailbox/body inspection or locked-phone/two-person/launch proof."
+}

@@ -12,14 +12,26 @@ export function makeServer(controller: Controller, token: string) {
   if (token.length < 32) throw new Error('Provision APP_AUTH_TOKEN with at least 32 random characters.');
   const owner = createHash('sha256').update(token).digest('hex');
   const buckets = new Map<string, { count: number; expires: number }>();
-  const envelope = (session: ReturnType<Controller['read']>) => ({ session, pages: pages(session), cue: controller.config.cue,
-    serverNow: controller.now(), oneTapEnabled: controller.config.oneTap === true, aiConfigured: controller.drafter != null });
+  const envelope = (session: ReturnType<Controller['read']>) => ({
+    // The installed client polls SENDING, but does not know the new GENERATING phase.
+    // Persist the real phase; this transport alias is limited to sessions using Review.
+    session: session.legacyReviewFlow && session.phase === 'GENERATING'
+      ? { ...session, phase: 'SENDING', outcome: 'Writing your email from captured notes. Gmail has not been contacted. End / clear cancels before dispatch.' }
+      : session,
+    pages: pages(session), cue: controller.config.cue,
+    serverNow: controller.now(), oneTapEnabled: controller.config.oneTap === true, aiConfigured: controller.drafter != null,
+    legacyReviewFollowup: controller.config.legacyReviewFollowup === true });
   return createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
     const reply = (status: number, value: unknown) => { res.writeHead(status); res.end(JSON.stringify(value)); };
     if (req.url === '/health' && req.method === 'GET') { reply(200, { ok: true, provider: 'gmail', liveSending: controller.config.live,
       oneTapEnabled: controller.config.oneTap === true, aiConfigured: controller.drafter != null,
-      hardwareCaptureVerified: controller.config.hardwareVerified }); return; }
+      hardwareCaptureVerified: controller.config.hardwareVerified,
+      liveSelfTestOnly: controller.config.live && !controller.config.hardwareVerified && !!controller.config.selfTestRecipient,
+      gmailConfigured: controller.sender instanceof GmailSender &&
+        Object.values(controller.sender.config).every(value => !!value),
+      spokenRecipientEnabled: controller.config.spokenRecipient === true,
+      legacyReviewFollowup: controller.config.legacyReviewFollowup === true }); return; }
     const supplied = req.headers.authorization?.replace(/^Bearer /, '') ?? '';
     if (!timingSafeEqual(createHash('sha256').update(supplied).digest(), Buffer.from(owner, 'hex'))) { reply(401, { error: 'Unauthorized' }); return; }
     const bucketKey = req.socket.remoteAddress ?? 'unknown';
@@ -43,6 +55,9 @@ export function makeServer(controller: Controller, token: string) {
       if (!match?.[1]) throw new Fault('Not found', 404);
       const id = match[1], action = match[2];
       if (req.method === 'POST' && action === 'followup') { reply(202, envelope(controller.followup(id, owner))); return; }
+      if (req.method === 'POST' && action === 'review' && controller.config.legacyReviewFollowup === true) {
+        reply(202, envelope(controller.followup(id, owner, true))); return;
+      }
       const s = req.method === 'GET' && !action ? controller.read(id, owner)
         : req.method === 'DELETE' && !action ? controller.end(id, owner)
         : req.method === 'POST' && action === 'segment' ? await controller.segment(id, owner, input as unknown as Segment)
@@ -60,7 +75,11 @@ export function run() {
   const store = new Store(path, Buffer.from(env.DATA_ENCRYPTION_KEY!, 'hex'));
   const controller = new Controller(store, { cue: env.SEND_CUE ?? DEFAULT_SEND_CUE, live: env.ALLOW_LIVE_EMAIL === 'true',
     allowlist: (env.TEST_RECIPIENT_ALLOWLIST ?? '').split(',').map(s => s.trim()).filter(Boolean), hardwareVerified: env.HARDWARE_CAPTURE_VERIFIED === 'true',
-    oneTap: env.ENABLE_ONE_TAP_FOLLOWUP === 'true' },
+    oneTap: env.ENABLE_ONE_TAP_FOLLOWUP === 'true', legacyReviewFollowup: env.LEGACY_REVIEW_FOLLOWUP === 'true',
+    spokenRecipient: env.ENABLE_SPOKEN_RECIPIENT === 'true',
+    // This exception never enables voice sending or another recipient. Gmail OAuth
+    // bootstrap verifies the account matches GMAIL_SENDER before provisioning.
+    selfTestRecipient: env.ALLOW_UNVERIFIED_SELF_TEST === 'true' ? env.GMAIL_SENDER : undefined },
     new GmailSender({ clientId: env.GOOGLE_CLIENT_ID ?? '', clientSecret: env.GOOGLE_CLIENT_SECRET ?? '', refreshToken: env.GOOGLE_REFRESH_TOKEN ?? '', sender: env.GMAIL_SENDER ?? '' }),
     Date.now, env.OPENAI_API_KEY ? new OpenAIDrafter(env.OPENAI_API_KEY, env.OPENAI_MODEL || DEFAULT_DRAFT_MODEL) : undefined);
   const server = makeServer(controller, env.APP_AUTH_TOKEN ?? '');

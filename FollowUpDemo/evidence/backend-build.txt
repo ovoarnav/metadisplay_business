@@ -1,2 +1,7 @@
-npm notice run build
-npm notice run tsc -p tsconfig.json
+Observed on Windows, October 12, 2026 local time.
+Node v24.19.0; TypeScript 7.0.2.
+Command: node node_modules/typescript/lib/tsc.js -p tsconfig.json
+Exit code: 0
+Compiler stdout: empty (successful compilation).
+Emitted JavaScript is provided in backend/dist; compiled-server startup is covered by the 51-test suite.
+This does not compile the Swift application or prove any hardware behavior.

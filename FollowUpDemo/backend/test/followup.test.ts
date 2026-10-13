@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { Controller, Store, CALENDLY } from '../src/core.ts';
+import { Controller, Store, CALENDLY, pages } from '../src/core.ts';
 import type { Draft, Segment, Source, ProviderOutcome } from '../src/core.ts';
 import { OpenAIDrafter } from '../src/drafting.ts';
 import { makeServer } from '../src/server.ts';
@@ -14,12 +14,12 @@ const message = (segments: Segment[], version: number): Draft => ({ version, sub
   calendly: CALENDLY, evidenceIds: [segments[0]!.id] });
 function deferred<T>() { let complete!: (value: T) => void; const promise = new Promise<T>(resolve => complete = resolve); return { promise, complete }; }
 function fixture(options: { live?: boolean; verified?: boolean; oneTap?: boolean; draft?: (s: Segment[], v: number) => Promise<Draft>;
-  sender?: () => Promise<ProviderOutcome>; noAI?: boolean } = {}) {
+  sender?: () => Promise<ProviderOutcome>; noAI?: boolean; selfTest?: string } = {}) {
   const prefix = join(tmpdir(), 'followup-button-'); const dir = mkdtempSync(prefix);
   const path = join(dir, 'test.sqlite'), key = randomBytes(32); const store = new Store(path, key);
   let drafts = 0, sends = 0;
   const controller = new Controller(store, { cue: 'configured cue', live: options.live ?? false,
-    hardwareVerified: options.verified ?? false, oneTap: options.oneTap ?? true, allowlist: ['tester@example.com'] },
+    hardwareVerified: options.verified ?? false, oneTap: options.oneTap ?? true, allowlist: ['tester@example.com'], selfTestRecipient: options.selfTest },
     { send: async () => { sends++; return options.sender ? options.sender() : { status: 'SENT', detail: 'Fake Gmail accepted', providerId: 'fake' }; } },
     () => 10000, options.noAI ? undefined : { draft: async (s, v) => { drafts++; return options.draft ? options.draft(s, v) : message(s, v); } });
   const prepare = async (source: Source = 'meta-speech') => {
@@ -84,6 +84,54 @@ test('live button gates reject missing hardware evidence, simulated capture and 
     } finally { f.cleanup(); }
   }
 });
+test('explicit self-test permits one physical-source button send to the sender without claiming hardware verification', async () => {
+  const f = fixture({ live: true, selfTest: 'tester@example.com' });
+  try {
+    const s = await f.prepare(); f.controller.followup(s.id, 'owner', true); await f.controller.waitForFollowup(s.id);
+    const done = f.controller.read(s.id, 'owner'); assert.equal(done.phase, 'SENT'); assert.equal(done.selfTestOnly, true);
+    assert.equal(f.controller.config.hardwareVerified, false); assert.ok(done.outcome.includes('Hardware verification is pending'));
+    assert.equal(f.sends(), 1); f.controller.followup(s.id, 'owner', true); assert.equal(f.sends(), 1);
+  } finally { f.cleanup(); }
+});
+
+test('self-test exception rejects other allowlisted recipients and simulation before calling AI or Gmail', async () => {
+  for (const scenario of ['recipient', 'simulation']) {
+    const f = fixture({ live: true, selfTest: 'tester@example.com' });
+    try {
+      let s = await f.prepare(scenario === 'simulation' ? 'simulation' : 'meta-speech');
+      if (scenario === 'recipient') {
+        f.controller.config.allowlist.push('other@example.com');
+        s = f.controller.update(s.id, 'owner', 'recipient', { recipient: 'other@example.com' });
+        s = f.controller.update(s.id, 'owner', 'confirm', { recipient: s.recipient });
+      }
+      assert.throws(() => f.controller.followup(s.id, 'owner')); assert.equal(f.drafts(), 0); assert.equal(f.sends(), 0);
+    } finally { f.cleanup(); }
+  }
+});
+
+test('self-test permission and allowlist are rechecked after asynchronous generation before dispatch', async () => {
+  for (const scenario of ['permission', 'allowlist']) {
+    const gate = deferred<Draft>(); const f = fixture({ live: true, selfTest: 'tester@example.com', draft: () => gate.promise });
+    try {
+      const s = await f.prepare(); f.controller.followup(s.id, 'owner', true);
+      if (scenario === 'permission') f.controller.config.selfTestRecipient = undefined;
+      else f.controller.config.allowlist = [];
+      gate.complete(message(s.segments, 2)); await f.controller.waitForFollowup(s.id);
+      const done = f.controller.read(s.id, 'owner'); assert.equal(done.phase, 'FAILED'); assert.equal(done.outboxId, null); assert.equal(f.sends(), 0);
+    } finally { f.cleanup(); }
+  }
+});
+
+test('self-test permission does not enable unverified voice arming', async () => {
+  const f = fixture({ live: true, selfTest: 'tester@example.com' });
+  try {
+    let s = await f.prepare('hfp'); s = f.controller.update(s.id, 'owner', 'review', {});
+    for (let i = 0; i < pages(s).length; i++) s = f.controller.update(s.id, 'owner', 'page', { page: i });
+    assert.throws(() => f.controller.update(s.id, 'owner', 'arm', { captureMs: 1000 }), /verified HFP/);
+    assert.equal(f.sends(), 0);
+  } finally { f.cleanup(); }
+});
+
 test('pause, recipient correction, deletion and new conversation cancel a pending AI result before dispatch', async () => {
   for (const action of ['pause','recipient','end','new']) {
     const gate = deferred<Draft>(); const f = fixture({ live: true, verified: true, draft: () => gate.promise });
@@ -169,6 +217,7 @@ function aiResponse(value: unknown, status = 'completed') {
 const notes: Segment[] = [{ id: 'note', text: 'We discussed missed follow-ups, not an agreed purchase.', final: true,
   epoch: 'epoch', sequence: 1, capturedMs: 0, source: 'meta-speech', speaker: 'unknown' }];
 const output = { subject: 'Following up', paragraphs: ['We discussed improving how you handle follow-ups.'],
+  context: [{ kind: 'discussion', text: 'Missed follow-ups, with no agreed purchase.', noteIds: ['note'] }],
   evidence: [{ id: 'note', quote: 'missed follow-ups' }] };
 test('OpenAI agent uses structured output, validates source quotes and adds the fixed booking link in code', async () => {
   const agent = new OpenAIDrafter('fake-key', 'test-model', (async (url, options) => {
@@ -180,6 +229,22 @@ test('OpenAI agent uses structured output, validates source quotes and adds the 
   }) as typeof fetch);
   const draft = await agent.draft(notes, 3); assert.equal(draft.version, 3); assert.deepEqual(draft.evidenceIds, ['note']);
   assert.equal(draft.calendly, CALENDLY); assert.ok(draft.body.includes(CALENDLY));
+  assert.equal(draft.context?.noteCount, 1); assert.equal(draft.context?.points[0]?.kind, 'discussion');
+});
+
+test('context agent combines ordered clauses across notes, preserves uncertainty instructions, and requires evidence for each context point', async () => {
+  const split = [notes[0]!, { ...notes[0]!, id: 'second', sequence: 2, text: 'A next conversation is possible, not scheduled.' }];
+  const agent = new OpenAIDrafter('fake', 'model', (async (_url, options) => {
+    const request = JSON.parse(String(options?.body)); assert.ok(request.instructions.includes('ONE continuous conversation'));
+    assert.ok(request.instructions.includes('agreed commitment')); assert.ok(request.instructions.includes('recipient setup'));
+    const input = JSON.parse(request.input[0].content); assert.deepEqual(input.notes.map((n: { id: string }) => n.id), ['note','second']);
+    return aiResponse({ ...output, context: [{ kind: 'uncertainty', text: 'A next conversation is possible, not scheduled.', noteIds: ['second'] }],
+      evidence: [{ id: 'second', quote: 'possible, not scheduled' }] });
+  }) as typeof fetch);
+  const draft = await agent.draft(split, 2); assert.equal(draft.context?.points[0]?.kind, 'uncertainty');
+  const forged = new OpenAIDrafter('fake', 'model', (async () => aiResponse({ ...output,
+    context: [{ kind: 'agreed_action', text: 'An invented commitment.', noteIds: ['missing'] }] })) as typeof fetch);
+  await assert.rejects(forged.draft(split, 2));
 });
 test('AI refusal, truncation, forged evidence and generated addresses/URLs fail closed before Gmail', async () => {
   for (const value of [{ ...output, evidence: [{ id: 'other', quote: 'missed follow-ups' }] },

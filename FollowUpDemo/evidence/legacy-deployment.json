@@ -1,0 +1,10 @@
+{
+  "checkedAt": "2026-10-13T02:14:25.441Z",
+  "deploymentId": "c7b45c3d-6353-4a5c-a027-ebc4ccd7eab9",
+  "commitSha": "1d7521dddecc1b3d93c848f0fb4220ccbfffff4f",
+  "base": "https://followup-backend-production.up.railway.app",
+  "status": "SUCCESS",
+  "health": {"ok":true,"provider":"gmail","liveSending":false,"oneTapEnabled":true,"aiConfigured":true,"hardwareCaptureVerified":false,"legacyReviewFollowup":true},
+  "unauthenticatedReviewStatus":401,
+  "limitations":"38 local tests simulate the old client and providers. The installed phone's authenticated upload/Review flow and real glasses have not exercised the compatibility behavior yet. Gmail consent/send and session recovery across this replacement container remain untested."
+}

@@ -1,20 +1,27 @@
 import { randomUUID, createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { captureRecipient, recipientCandidate } from './recipient.ts';
+import type { RecipientCapture } from './recipient.ts';
 
 export const CALENDLY = 'https://calendly.com/arnavnambiar981/30min';
 export const DEFAULT_SEND_CUE = "I just realized I haven't shown you how good I am as a developer";
 export type Phase = 'IDLE' | 'DRAFTING' | 'GENERATING' | 'PAUSED' | 'REVIEW' | 'ARMED' | 'SENDING' | 'SENT' | 'FAILED' | 'UNKNOWN' | 'DRY_RUN' | 'ENDED';
 export type Source = 'meta-speech' | 'hfp' | 'simulation';
 export type Segment = { id: string; sequence: number; epoch: string; text: string; final: boolean; source: Source; capturedMs: number; speaker: 'unknown' | 'wearer' | 'prospect' };
-export type Draft = { version: number; subject: string; body: string; calendly: string; evidenceIds: string[] };
+export type Draft = { version: number; subject: string; body: string; calendly: string; evidenceIds: string[];
+  context?: { points: { kind: string; text: string; noteIds: string[] }[]; noteCount: number; usedCharacters: number; truncated: boolean } };
 export type Session = {
   id: string; owner: string; phase: Phase; recipient: string; confirmed: boolean;
   segments: Segment[]; draft: Draft | null; approved: (Draft & { recipient: string; digest: string }) | null;
   revision: number; epoch: string; lastSequence: number; source: Source;
   reviewPage: number; arm: { epoch: string; minCaptureMs: number; deadline: number } | null;
   created: number; expires: number; outcome: string; outboxId: string | null;
+  legacyReviewFlow?: boolean;
+  selfTestOnly?: boolean;
+  recipientCapture?: RecipientCapture;
+  recipientOrigin?: 'manual' | 'speech';
 };
-export type Config = { cue: string; live: boolean; allowlist: string[]; hardwareVerified: boolean; oneTap?: boolean };
+export type Config = { cue: string; live: boolean; allowlist: string[]; hardwareVerified: boolean; oneTap?: boolean; legacyReviewFollowup?: boolean; selfTestRecipient?: string; spokenRecipient?: boolean };
 export type Drafter = { draft: (segments: Segment[], version: number) => Promise<Draft> };
 export type ProviderOutcome = { status: 'SENT' | 'FAILED' | 'UNKNOWN'; detail: string; providerId?: string };
 export type Sender = { send: (message: { recipient: string; subject: string; body: string; identity: string }) => Promise<ProviderOutcome> };
@@ -116,6 +123,8 @@ export class Controller {
         const previous = this.store.get(String(old.session_id), owner);
         previous.arm = null; previous.phase = previous.outboxId ? previous.phase : 'ENDED';
         previous.segments = []; previous.draft = null; previous.approved = null; previous.recipient = ''; previous.confirmed = false;
+        previous.recipientCapture = undefined;
+        previous.recipientOrigin = undefined;
         this.store.put(previous);
       }
       const s: Session = { id: randomUUID(), owner, phase: 'DRAFTING', recipient: '', confirmed: false, segments: [], draft: null,
@@ -133,7 +142,10 @@ export class Controller {
       if (s.phase === 'GENERATING' && !['pause','recipient','edit'].includes(action)) throw new Fault('Email generation is in progress; pause or cancel before changing the session.');
       switch (action) {
         case 'recipient':
-          s.recipient = email(input.recipient); s.confirmed = false; s.approved = null; s.arm = null; s.phase = 'DRAFTING'; s.reviewPage = -1; break;
+          s.recipient = email(recipientCandidate(input.recipient) ?? input.recipient);
+          s.recipientOrigin = 'manual';
+          s.confirmed = false; s.approved = null; s.arm = null; s.phase = 'DRAFTING'; s.reviewPage = -1;
+          s.epoch = randomUUID(); s.lastSequence = 0; s.recipientCapture = undefined; break;
         case 'confirm':
           if (input.recipient !== s.recipient || !s.recipient) throw new Fault('Confirmation must match the literal address.');
           s.confirmed = true; break;
@@ -147,7 +159,8 @@ export class Controller {
           if (s.phase !== 'REVIEW' || input.page !== s.reviewPage + 1 || Number(input.page) >= pages(s).length) throw new Fault('Review each page in order.');
           s.reviewPage = Number(input.page); break;
         case 'edit':
-          s.arm = null; s.approved = null; s.phase = 'DRAFTING'; s.reviewPage = -1; break;
+          s.arm = null; s.approved = null; s.phase = 'DRAFTING'; s.reviewPage = -1;
+          s.epoch = randomUUID(); s.lastSequence = 0; s.recipientCapture = undefined; break;
         case 'arm':
           if (s.phase !== 'REVIEW' || !s.approved || s.reviewPage !== pages(s).length - 1) throw new Fault('Review the exact complete message before arming.');
           if (!this.config.cue.trim()) throw new Fault('Configure Arnav’s rehearsed full cue before arming.');
@@ -157,7 +170,7 @@ export class Controller {
           s.epoch = randomUUID(); s.lastSequence = 0;
           s.arm = { epoch: s.epoch, minCaptureMs: Number(input.captureMs), deadline: this.now() + 15_000 }; s.phase = 'ARMED'; break;
         case 'pause':
-          s.arm = null; s.approved = null; s.phase = 'PAUSED'; s.epoch = randomUUID(); s.lastSequence = 0; break;
+          s.arm = null; s.approved = null; s.phase = 'PAUSED'; s.epoch = randomUUID(); s.lastSequence = 0; s.recipientCapture = undefined; break;
         case 'resume':
           if (s.phase !== 'PAUSED') throw new Fault('Only resume a paused session.');
           s.phase = 'DRAFTING'; s.epoch = randomUUID(); s.lastSequence = 0; break;
@@ -188,6 +201,15 @@ export class Controller {
       } else if (s.phase === 'DRAFTING' && !s.segments.some(x => x.id === input.id)) {
         s.segments.push({ ...input, speaker: ['wearer','prospect'].includes(input.speaker) ? input.speaker : 'unknown' });
         s.segments = s.segments.slice(-100); s.revision++;
+        if (this.config.spokenRecipient && !s.confirmed && (!s.recipient || s.recipientOrigin === 'speech')) {
+          const result = captureRecipient(s.recipientCapture, input.text, s.epoch, this.now());
+          s.recipientCapture = result.capture;
+          if (result.candidate) { s.recipient = email(result.candidate); s.recipientOrigin = 'speech'; s.outcome = 'Spoken address assembled. Verify every character on the glasses before confirming.'; }
+          else if (result.completed || result.capture?.started) {
+            s.recipient = '';
+            if (result.completed) s.outcome = 'Address could not be assembled. Spell it again with a full domain, or type the literal address on the phone.';
+          }
+        }
         s.draft = groundedDraft(s.segments, s.revision);
       }
       this.store.put(s);
@@ -195,7 +217,7 @@ export class Controller {
     if (pending) await this.dispatch(id, owner, pending);
     return this.read(id, owner);
   }
-  followup(id: string, owner: string): Session {
+  followup(id: string, owner: string, legacyReviewFlow = false): Session {
     let snapshot: Session | undefined;
     const state = this.store.transaction(() => {
       const s = this.read(id, owner);
@@ -206,10 +228,10 @@ export class Controller {
       if (s.phase !== 'DRAFTING' || !s.confirmed || !s.recipient || !s.segments.some(x => x.final && x.text.trim())) {
         throw new Fault('Start a conversation, confirm the literal recipient, and capture finalized notes before Follow-up.');
       }
-      if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
+      if (this.config.live && !this.liveFollowupAllowed(s)) {
         throw new Fault('Live Follow-up needs verified physical capture/display and an allowlisted test recipient.');
       }
-      s.phase = 'GENERATING'; s.arm = null; s.epoch = randomUUID();
+      s.phase = 'GENERATING'; s.arm = null; s.epoch = randomUUID(); s.legacyReviewFlow = legacyReviewFlow;
       s.outcome = 'Writing the email from finalized conversation notes…';
       this.store.put(s); snapshot = structuredClone(s); return s;
     });
@@ -226,6 +248,10 @@ export class Controller {
     return state;
   }
   async waitForFollowup(id: string): Promise<void> { await this.followupJobs.get(id); }
+  private liveFollowupAllowed(s: Session): boolean {
+    if (s.source === 'simulation' || !this.config.allowlist.includes(s.recipient)) return false;
+    return this.config.hardwareVerified || (!!this.config.selfTestRecipient && s.recipient === this.config.selfTestRecipient);
+  }
   private async generateFollowup(snapshot: Session): Promise<Session> {
     const { id, owner, epoch } = snapshot;
     let draft: Draft;
@@ -239,7 +265,10 @@ export class Controller {
     } catch {
       const s = this.read(id, owner);
       if (s.phase === 'GENERATING' && s.epoch === epoch) {
-        s.phase = 'DRAFTING'; s.outcome = 'AI drafting failed. No email sent; inspect AI configuration or try Follow-up again deliberately.';
+        s.phase = snapshot.legacyReviewFlow ? 'FAILED' : 'DRAFTING';
+        s.outcome = snapshot.legacyReviewFlow
+          ? 'AI drafting failed. No email sent. End / clear, check the backend configuration, and start a new conversation.'
+          : 'AI drafting failed. No email sent; inspect AI configuration or try Follow-up again deliberately.';
         this.store.put(s);
       }
       return s;
@@ -249,8 +278,8 @@ export class Controller {
       const s = this.read(id, owner);
       // Cancel, correction, expiry, or a new conversation invalidates this result.
       if (s.phase !== 'GENERATING' || s.epoch !== epoch || !s.confirmed || s.recipient !== snapshot.recipient) return;
-      if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
-        s.phase = 'DRAFTING'; s.outcome = 'Live sending configuration changed. No email sent.'; this.store.put(s); return;
+      if (this.config.live && !this.liveFollowupAllowed(s)) {
+        s.phase = s.legacyReviewFlow ? 'FAILED' : 'DRAFTING'; s.outcome = 'Live sending configuration changed. No email sent.'; this.store.put(s); return;
       }
       s.draft = { ...draft, version: snapshot.revision + 1 };
       const message = { ...s.draft, recipient: s.recipient };
@@ -258,8 +287,10 @@ export class Controller {
       // not by message review. Recipient/Calendly/dispatch remain controlled by code.
       s.approved = { ...message, digest: hash(JSON.stringify(message)) };
       const identity = `${s.id}:${s.approved.digest}`;
+      s.selfTestOnly = this.config.live && !this.config.hardwareVerified && s.recipient === this.config.selfTestRecipient;
       s.outboxId = identity; s.phase = this.config.live ? 'SENDING' : 'DRY_RUN';
       s.outcome = this.config.live ? 'Sending the generated email through Gmail…' : 'AI email generated in dry-run mode. No email sent.';
+      if (s.legacyReviewFlow) s.outcome += `\nTo: ${s.recipient}\nSubject: ${s.draft.subject}`;
       this.store.db.prepare('INSERT INTO outbox(id,session_id,digest,status,created) VALUES (?,?,?,?,?)')
         .run(identity, s.id, s.approved.digest, s.phase, this.now());
       this.store.put(s);
@@ -273,16 +304,20 @@ export class Controller {
       let result: ProviderOutcome;
       try { result = await this.sender.send(pending); }
       catch { result = { status: 'UNKNOWN', detail: 'Provider outcome unknown; inspect Gmail Sent. Do not resend.' }; }
+      // Provider status only: never log transcripts, email content or credentials.
+      console.info(`Follow-up Gmail outcome: ${result.status}`);
       this.store.transaction(() => {
         const s = this.store.get(id, owner);
         if (!s.outboxId) throw new Fault('Send identity missing');
         this.store.db.prepare('UPDATE outbox SET status=?,provider_id=? WHERE id=?').run(result.status, result.providerId ?? null, s.outboxId);
-        s.phase = result.status; s.outcome = result.detail; s.arm = null; this.store.put(s);
+        s.phase = result.status; s.outcome = result.detail;
+        if (s.selfTestOnly) s.outcome += '\nSelf-test to your Gmail account only. Hardware verification is pending.';
+        s.arm = null; this.store.put(s);
       });
   }
   end(id: string, owner: string): Session {
     const s = this.store.get(id, owner);
-    s.phase = s.outboxId ? s.phase : 'ENDED'; s.arm = null; s.segments = []; s.draft = null; s.approved = null; s.recipient = ''; s.confirmed = false;
+    s.phase = s.outboxId ? s.phase : 'ENDED'; s.arm = null; s.segments = []; s.draft = null; s.approved = null; s.recipient = ''; s.confirmed = false; s.recipientCapture = undefined; s.recipientOrigin = undefined;
     this.store.put(s); return s;
   }
   purge() {

@@ -1,6 +1,6 @@
 # Test results — October 12, 2026
 
-**34 backend tests PASS; 0 failures. TypeScript build PASS. Compiled JavaScript server startup/health/authenticated session creation PASS.** Actual output is in `evidence/backend-tests.txt` and `evidence/backend-build.txt`.
+**51 backend tests PASS; 0 failures. TypeScript build PASS. Compiled JavaScript server startup/health/authenticated session creation PASS.** Actual output is in `evidence/backend-tests.txt` and `evidence/backend-build.txt`.
 
 The automated suite executed on Windows with Node v24.19.0. Provider interactions in that suite are injected fake HTTP responses. Simulation of text, source epochs and cue timing is controller simulation; no glasses, real audio, inbox, Google consent or booking was involved. Separately, one small real OpenAI API call using synthetic notes passed; its sanitized output is in `evidence/real-ai-test.txt`. That call did not contact Gmail or send email.
 
@@ -54,3 +54,11 @@ The automated suite executed on Windows with Node v24.19.0. Provider interaction
 **Subsequent physical observation: user-reported text and transcript.** Arnav reports text on real glasses and transcript visible on the iPhone. No counter result, capture source, two-person test or locked-phone duration was supplied. The new one-tap native code has not been compiled, installed or tested on real glasses.
 
 **Real OpenAI synthetic validation: PASS.** gpt-4.1-mini-2025-04-14 returned a validated structured email from synthetic finalized notes in 2,796 ms on one call, with the reviewed Calendly URL added by code. This was a billable model request. Earlier attempts did not reach the API because of network/private-file access and are not API pass claims. No Gmail call was made. Source-quote matching checks provenance; semantic faithfulness across real conversations remains unmeasured.
+
+A real Railway Docker build and hosted synthetic dry-run passed on October 12, 2026 local time: public HTTPS health, bearer authentication, asynchronous generation, fixed Calendly URL and duplicate presses sharing one outbox. The second real OpenAI call completed this flow in 3,345 ms and made no Gmail call. See `evidence/hosted-dry-run.json`. The 34-test automated count is unchanged.
+
+Four added installed-client protocol tests passed: explicit legacy Review opt-in, asynchronous compatible progress, repeated presses sharing a job/outbox, cancellation, recipient/note gates and terminal AI failure. Native source was inspected; the installed binary and real glasses have not exercised this compatibility flow yet. Provider calls in these cases are fake. See `evidence/legacy-backend-tests.txt`.
+
+Four own-address-only live-gate tests passed: a physical-source button can use the explicit exception, other recipients and simulation are rejected, permission/allowlist are rechecked after AI, and unverified voice arming remains blocked. All provider calls in the 51-test suite are fake. A separate real Google refresh/account check passed without dispatch; see evidence/gmail-authorization.json.
+
+The first real hosted Gmail dispatch returned SENT in Railway runtime logs at 2026-10-13T03:18:33.828301170Z; Arnav reports “SENT and email received.” This is provider acceptance plus user-reported inbox evidence, not independent body or hardware verification. Eight recipient tests and one context-agent test bring the latest fake-transport suite to 51 passing tests. They cover split chunks/start marker, explicit completion, correction, no partial/confirmed/manual override, literal confirmation, epoch resets and context provenance. See evidence/gmail-first-live-send.json and evidence/recipient-context-tests.txt. New spoken intake/context quality on hardware is pending.
