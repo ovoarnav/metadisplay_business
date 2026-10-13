@@ -8,7 +8,7 @@ The installed app polls SENDING but does not understand GENERATING. The server s
 
 ## Actions on the existing iPhone app
 
-1. On the glasses, stop **Capture diagnostic**. Keep the display connected.
+1. On the glasses, select **Stop capture** to leave Capture diagnostic. Keep the display connected.
 2. In the phone's **Setup before the conversation**, enter backend URL `https://followup-backend-production.up.railway.app`. In Railway's existing Follow-up Demo project, open **Project Settings > Shared Variables > production**, reveal/copy `APP_AUTH_TOKEN` privately to the app's **Device access token**, then select **Save backend setup**. Do not copy OpenAI, Gmail or encryption secrets to the phone.
 3. Enter one consenting test recipient's full literal email address. Both people must consent to transcription and server-side AI drafting; enable the consent toggle. Choose physical Meta Speech or the explicitly selected glasses HFP path. The existing consent label mentions transcription; explain AI drafting verbally as well.
 4. On the glasses select **Start follow-up** (or Start conversation if using the newer app), then **Confirm recipient**. Speak a short, fresh test conversation. The phone should show **DRAFTING** and a session ID under Capture and session diagnostics. This is the email-conversation mode, not Capture diagnostic.
@@ -22,3 +22,5 @@ Gmail authorization can be completed on this **Windows computer** using its inst
 Keep `ALLOW_LIVE_EMAIL=false` and `HARDWARE_CAPTURE_VERIFIED=false` while testing. A useful two-person capture and five-minute locked/pocketed run with the debugger disconnected remain required physical checks. Choose an allowlisted consenting recipient for one live Gmail rehearsal afterward. The old Capture diagnostic success does not prove uploading, sending, useful capture of both people or phone-lock behavior.
 
 This is a backend-only compatibility change. Tests simulate the installed client's HTTP protocol; the new behavior has not yet been exercised by Arnav's installed binary or real glasses. Current deployment evidence is in STATUS.md.
+
+Deployment verified: commit 1d7521dddecc1b3d93c848f0fb4220ccbfffff4f, Railway SUCCESS, public health legacyReviewFollowup: true, live flags false, unauthenticated Review 401. The installed phone test is pending configuration of its backend URL/device token.
