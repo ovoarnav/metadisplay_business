@@ -1,6 +1,6 @@
 # Test results — October 12, 2026
 
-**42 backend tests PASS; 0 failures. TypeScript build PASS. Compiled JavaScript server startup/health/authenticated session creation PASS.** Actual output is in `evidence/backend-tests.txt` and `evidence/backend-build.txt`.
+**50 backend tests PASS; 0 failures. TypeScript build PASS. Compiled JavaScript server startup/health/authenticated session creation PASS.** Actual output is in `evidence/backend-tests.txt` and `evidence/backend-build.txt`.
 
 The automated suite executed on Windows with Node v24.19.0. Provider interactions in that suite are injected fake HTTP responses. Simulation of text, source epochs and cue timing is controller simulation; no glasses, real audio, inbox, Google consent or booking was involved. Separately, one small real OpenAI API call using synthetic notes passed; its sanitized output is in `evidence/real-ai-test.txt`. That call did not contact Gmail or send email.
 
@@ -59,4 +59,6 @@ A real Railway Docker build and hosted synthetic dry-run passed on October 12, 2
 
 Four added installed-client protocol tests passed: explicit legacy Review opt-in, asynchronous compatible progress, repeated presses sharing a job/outbox, cancellation, recipient/note gates and terminal AI failure. Native source was inspected; the installed binary and real glasses have not exercised this compatibility flow yet. Provider calls in these cases are fake. See `evidence/legacy-backend-tests.txt`.
 
-Four own-address-only live-gate tests passed: a physical-source button can use the explicit exception, other recipients and simulation are rejected, permission/allowlist are rechecked after AI, and unverified voice arming remains blocked. All provider calls in the 42-test suite are fake. A separate real Google refresh/account check passed without dispatch; see evidence/gmail-authorization.json.
+Four own-address-only live-gate tests passed: a physical-source button can use the explicit exception, other recipients and simulation are rejected, permission/allowlist are rechecked after AI, and unverified voice arming remains blocked. All provider calls in the 50-test suite are fake. A separate real Google refresh/account check passed without dispatch; see evidence/gmail-authorization.json.
+
+The first real hosted Gmail dispatch returned SENT in Railway runtime logs at 2026-10-13T03:18:33.828301170Z; Arnav reports “SENT and email received.” This is provider acceptance plus user-reported inbox evidence, not independent body or hardware verification. Seven recipient tests and one context-agent test bring the latest fake-transport suite to 50 passing tests. They cover split chunks/start marker, explicit completion, correction, no partial/confirmed/manual override, literal confirmation, epoch resets and context provenance. See evidence/gmail-first-live-send.json and evidence/recipient-context-tests.txt. New spoken intake/context quality on hardware is pending.

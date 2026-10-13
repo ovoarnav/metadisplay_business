@@ -1,5 +1,6 @@
 import { randomUUID, createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { captureRecipient, recipientCandidate } from './recipient.js';
 export const CALENDLY = 'https://calendly.com/arnavnambiar981/30min';
 export const DEFAULT_SEND_CUE = "I just realized I haven't shown you how good I am as a developer";
 export class Fault extends Error {
@@ -138,6 +139,8 @@ export class Controller {
                 previous.approved = null;
                 previous.recipient = '';
                 previous.confirmed = false;
+                previous.recipientCapture = undefined;
+                previous.recipientOrigin = undefined;
                 this.store.put(previous);
             }
             const s = { id: randomUUID(), owner, phase: 'DRAFTING', recipient: '', confirmed: false, segments: [], draft: null,
@@ -157,12 +160,16 @@ export class Controller {
                 throw new Fault('Email generation is in progress; pause or cancel before changing the session.');
             switch (action) {
                 case 'recipient':
-                    s.recipient = email(input.recipient);
+                    s.recipient = email(recipientCandidate(input.recipient) ?? input.recipient);
+                    s.recipientOrigin = 'manual';
                     s.confirmed = false;
                     s.approved = null;
                     s.arm = null;
                     s.phase = 'DRAFTING';
                     s.reviewPage = -1;
+                    s.epoch = randomUUID();
+                    s.lastSequence = 0;
+                    s.recipientCapture = undefined;
                     break;
                 case 'confirm':
                     if (input.recipient !== s.recipient || !s.recipient)
@@ -191,6 +198,9 @@ export class Controller {
                     s.approved = null;
                     s.phase = 'DRAFTING';
                     s.reviewPage = -1;
+                    s.epoch = randomUUID();
+                    s.lastSequence = 0;
+                    s.recipientCapture = undefined;
                     break;
                 case 'arm':
                     if (s.phase !== 'REVIEW' || !s.approved || s.reviewPage !== pages(s).length - 1)
@@ -214,6 +224,7 @@ export class Controller {
                     s.phase = 'PAUSED';
                     s.epoch = randomUUID();
                     s.lastSequence = 0;
+                    s.recipientCapture = undefined;
                     break;
                 case 'resume':
                     if (s.phase !== 'PAUSED')
@@ -260,6 +271,20 @@ export class Controller {
                 s.segments.push({ ...input, speaker: ['wearer', 'prospect'].includes(input.speaker) ? input.speaker : 'unknown' });
                 s.segments = s.segments.slice(-100);
                 s.revision++;
+                if (this.config.spokenRecipient && !s.confirmed && (!s.recipient || s.recipientOrigin === 'speech')) {
+                    const result = captureRecipient(s.recipientCapture, input.text, s.epoch, this.now());
+                    s.recipientCapture = result.capture;
+                    if (result.candidate) {
+                        s.recipient = email(result.candidate);
+                        s.recipientOrigin = 'speech';
+                        s.outcome = 'Spoken address assembled. Verify every character on the glasses before confirming.';
+                    }
+                    else if (result.completed || result.capture?.started) {
+                        s.recipient = '';
+                        if (result.completed)
+                            s.outcome = 'Address could not be assembled. Spell it again with a full domain, or type the literal address on the phone.';
+                    }
+                }
                 s.draft = groundedDraft(s.segments, s.revision);
             }
             this.store.put(s);
@@ -402,6 +427,8 @@ export class Controller {
         s.approved = null;
         s.recipient = '';
         s.confirmed = false;
+        s.recipientCapture = undefined;
+        s.recipientOrigin = undefined;
         this.store.put(s);
         return s;
     }

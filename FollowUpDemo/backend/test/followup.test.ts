@@ -217,6 +217,7 @@ function aiResponse(value: unknown, status = 'completed') {
 const notes: Segment[] = [{ id: 'note', text: 'We discussed missed follow-ups, not an agreed purchase.', final: true,
   epoch: 'epoch', sequence: 1, capturedMs: 0, source: 'meta-speech', speaker: 'unknown' }];
 const output = { subject: 'Following up', paragraphs: ['We discussed improving how you handle follow-ups.'],
+  context: [{ kind: 'discussion', text: 'Missed follow-ups, with no agreed purchase.', noteIds: ['note'] }],
   evidence: [{ id: 'note', quote: 'missed follow-ups' }] };
 test('OpenAI agent uses structured output, validates source quotes and adds the fixed booking link in code', async () => {
   const agent = new OpenAIDrafter('fake-key', 'test-model', (async (url, options) => {
@@ -228,6 +229,22 @@ test('OpenAI agent uses structured output, validates source quotes and adds the 
   }) as typeof fetch);
   const draft = await agent.draft(notes, 3); assert.equal(draft.version, 3); assert.deepEqual(draft.evidenceIds, ['note']);
   assert.equal(draft.calendly, CALENDLY); assert.ok(draft.body.includes(CALENDLY));
+  assert.equal(draft.context?.noteCount, 1); assert.equal(draft.context?.points[0]?.kind, 'discussion');
+});
+
+test('context agent combines ordered clauses across notes, preserves uncertainty instructions, and requires evidence for each context point', async () => {
+  const split = [notes[0]!, { ...notes[0]!, id: 'second', sequence: 2, text: 'A next conversation is possible, not scheduled.' }];
+  const agent = new OpenAIDrafter('fake', 'model', (async (_url, options) => {
+    const request = JSON.parse(String(options?.body)); assert.ok(request.instructions.includes('ONE continuous conversation'));
+    assert.ok(request.instructions.includes('agreed commitment')); assert.ok(request.instructions.includes('recipient setup'));
+    const input = JSON.parse(request.input[0].content); assert.deepEqual(input.notes.map((n: { id: string }) => n.id), ['note','second']);
+    return aiResponse({ ...output, context: [{ kind: 'uncertainty', text: 'A next conversation is possible, not scheduled.', noteIds: ['second'] }],
+      evidence: [{ id: 'second', quote: 'possible, not scheduled' }] });
+  }) as typeof fetch);
+  const draft = await agent.draft(split, 2); assert.equal(draft.context?.points[0]?.kind, 'uncertainty');
+  const forged = new OpenAIDrafter('fake', 'model', (async () => aiResponse({ ...output,
+    context: [{ kind: 'agreed_action', text: 'An invented commitment.', noteIds: ['missing'] }] })) as typeof fetch);
+  await assert.rejects(forged.draft(split, 2));
 });
 test('AI refusal, truncation, forged evidence and generated addresses/URLs fail closed before Gmail', async () => {
   for (const value of [{ ...output, evidence: [{ id: 'other', quote: 'missed follow-ups' }] },

@@ -30,6 +30,7 @@ export function makeServer(controller: Controller, token: string) {
       liveSelfTestOnly: controller.config.live && !controller.config.hardwareVerified && !!controller.config.selfTestRecipient,
       gmailConfigured: controller.sender instanceof GmailSender &&
         Object.values(controller.sender.config).every(value => !!value),
+      spokenRecipientEnabled: controller.config.spokenRecipient === true,
       legacyReviewFollowup: controller.config.legacyReviewFollowup === true }); return; }
     const supplied = req.headers.authorization?.replace(/^Bearer /, '') ?? '';
     if (!timingSafeEqual(createHash('sha256').update(supplied).digest(), Buffer.from(owner, 'hex'))) { reply(401, { error: 'Unauthorized' }); return; }
@@ -75,6 +76,7 @@ export function run() {
   const controller = new Controller(store, { cue: env.SEND_CUE ?? DEFAULT_SEND_CUE, live: env.ALLOW_LIVE_EMAIL === 'true',
     allowlist: (env.TEST_RECIPIENT_ALLOWLIST ?? '').split(',').map(s => s.trim()).filter(Boolean), hardwareVerified: env.HARDWARE_CAPTURE_VERIFIED === 'true',
     oneTap: env.ENABLE_ONE_TAP_FOLLOWUP === 'true', legacyReviewFollowup: env.LEGACY_REVIEW_FOLLOWUP === 'true',
+    spokenRecipient: env.ENABLE_SPOKEN_RECIPIENT === 'true',
     // This exception never enables voice sending or another recipient. Gmail OAuth
     // bootstrap verifies the account matches GMAIL_SENDER before provisioning.
     selfTestRecipient: env.ALLOW_UNVERIFIED_SELF_TEST === 'true' ? env.GMAIL_SENDER : undefined },

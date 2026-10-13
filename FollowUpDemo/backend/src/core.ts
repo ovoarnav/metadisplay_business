@@ -1,12 +1,15 @@
 import { randomUUID, createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { captureRecipient, recipientCandidate } from './recipient.ts';
+import type { RecipientCapture } from './recipient.ts';
 
 export const CALENDLY = 'https://calendly.com/arnavnambiar981/30min';
 export const DEFAULT_SEND_CUE = "I just realized I haven't shown you how good I am as a developer";
 export type Phase = 'IDLE' | 'DRAFTING' | 'GENERATING' | 'PAUSED' | 'REVIEW' | 'ARMED' | 'SENDING' | 'SENT' | 'FAILED' | 'UNKNOWN' | 'DRY_RUN' | 'ENDED';
 export type Source = 'meta-speech' | 'hfp' | 'simulation';
 export type Segment = { id: string; sequence: number; epoch: string; text: string; final: boolean; source: Source; capturedMs: number; speaker: 'unknown' | 'wearer' | 'prospect' };
-export type Draft = { version: number; subject: string; body: string; calendly: string; evidenceIds: string[] };
+export type Draft = { version: number; subject: string; body: string; calendly: string; evidenceIds: string[];
+  context?: { points: { kind: string; text: string; noteIds: string[] }[]; noteCount: number; usedCharacters: number; truncated: boolean } };
 export type Session = {
   id: string; owner: string; phase: Phase; recipient: string; confirmed: boolean;
   segments: Segment[]; draft: Draft | null; approved: (Draft & { recipient: string; digest: string }) | null;
@@ -15,8 +18,10 @@ export type Session = {
   created: number; expires: number; outcome: string; outboxId: string | null;
   legacyReviewFlow?: boolean;
   selfTestOnly?: boolean;
+  recipientCapture?: RecipientCapture;
+  recipientOrigin?: 'manual' | 'speech';
 };
-export type Config = { cue: string; live: boolean; allowlist: string[]; hardwareVerified: boolean; oneTap?: boolean; legacyReviewFollowup?: boolean; selfTestRecipient?: string };
+export type Config = { cue: string; live: boolean; allowlist: string[]; hardwareVerified: boolean; oneTap?: boolean; legacyReviewFollowup?: boolean; selfTestRecipient?: string; spokenRecipient?: boolean };
 export type Drafter = { draft: (segments: Segment[], version: number) => Promise<Draft> };
 export type ProviderOutcome = { status: 'SENT' | 'FAILED' | 'UNKNOWN'; detail: string; providerId?: string };
 export type Sender = { send: (message: { recipient: string; subject: string; body: string; identity: string }) => Promise<ProviderOutcome> };
@@ -118,6 +123,8 @@ export class Controller {
         const previous = this.store.get(String(old.session_id), owner);
         previous.arm = null; previous.phase = previous.outboxId ? previous.phase : 'ENDED';
         previous.segments = []; previous.draft = null; previous.approved = null; previous.recipient = ''; previous.confirmed = false;
+        previous.recipientCapture = undefined;
+        previous.recipientOrigin = undefined;
         this.store.put(previous);
       }
       const s: Session = { id: randomUUID(), owner, phase: 'DRAFTING', recipient: '', confirmed: false, segments: [], draft: null,
@@ -135,7 +142,10 @@ export class Controller {
       if (s.phase === 'GENERATING' && !['pause','recipient','edit'].includes(action)) throw new Fault('Email generation is in progress; pause or cancel before changing the session.');
       switch (action) {
         case 'recipient':
-          s.recipient = email(input.recipient); s.confirmed = false; s.approved = null; s.arm = null; s.phase = 'DRAFTING'; s.reviewPage = -1; break;
+          s.recipient = email(recipientCandidate(input.recipient) ?? input.recipient);
+          s.recipientOrigin = 'manual';
+          s.confirmed = false; s.approved = null; s.arm = null; s.phase = 'DRAFTING'; s.reviewPage = -1;
+          s.epoch = randomUUID(); s.lastSequence = 0; s.recipientCapture = undefined; break;
         case 'confirm':
           if (input.recipient !== s.recipient || !s.recipient) throw new Fault('Confirmation must match the literal address.');
           s.confirmed = true; break;
@@ -149,7 +159,8 @@ export class Controller {
           if (s.phase !== 'REVIEW' || input.page !== s.reviewPage + 1 || Number(input.page) >= pages(s).length) throw new Fault('Review each page in order.');
           s.reviewPage = Number(input.page); break;
         case 'edit':
-          s.arm = null; s.approved = null; s.phase = 'DRAFTING'; s.reviewPage = -1; break;
+          s.arm = null; s.approved = null; s.phase = 'DRAFTING'; s.reviewPage = -1;
+          s.epoch = randomUUID(); s.lastSequence = 0; s.recipientCapture = undefined; break;
         case 'arm':
           if (s.phase !== 'REVIEW' || !s.approved || s.reviewPage !== pages(s).length - 1) throw new Fault('Review the exact complete message before arming.');
           if (!this.config.cue.trim()) throw new Fault('Configure Arnav’s rehearsed full cue before arming.');
@@ -159,7 +170,7 @@ export class Controller {
           s.epoch = randomUUID(); s.lastSequence = 0;
           s.arm = { epoch: s.epoch, minCaptureMs: Number(input.captureMs), deadline: this.now() + 15_000 }; s.phase = 'ARMED'; break;
         case 'pause':
-          s.arm = null; s.approved = null; s.phase = 'PAUSED'; s.epoch = randomUUID(); s.lastSequence = 0; break;
+          s.arm = null; s.approved = null; s.phase = 'PAUSED'; s.epoch = randomUUID(); s.lastSequence = 0; s.recipientCapture = undefined; break;
         case 'resume':
           if (s.phase !== 'PAUSED') throw new Fault('Only resume a paused session.');
           s.phase = 'DRAFTING'; s.epoch = randomUUID(); s.lastSequence = 0; break;
@@ -190,6 +201,15 @@ export class Controller {
       } else if (s.phase === 'DRAFTING' && !s.segments.some(x => x.id === input.id)) {
         s.segments.push({ ...input, speaker: ['wearer','prospect'].includes(input.speaker) ? input.speaker : 'unknown' });
         s.segments = s.segments.slice(-100); s.revision++;
+        if (this.config.spokenRecipient && !s.confirmed && (!s.recipient || s.recipientOrigin === 'speech')) {
+          const result = captureRecipient(s.recipientCapture, input.text, s.epoch, this.now());
+          s.recipientCapture = result.capture;
+          if (result.candidate) { s.recipient = email(result.candidate); s.recipientOrigin = 'speech'; s.outcome = 'Spoken address assembled. Verify every character on the glasses before confirming.'; }
+          else if (result.completed || result.capture?.started) {
+            s.recipient = '';
+            if (result.completed) s.outcome = 'Address could not be assembled. Spell it again with a full domain, or type the literal address on the phone.';
+          }
+        }
         s.draft = groundedDraft(s.segments, s.revision);
       }
       this.store.put(s);
@@ -297,7 +317,7 @@ export class Controller {
   }
   end(id: string, owner: string): Session {
     const s = this.store.get(id, owner);
-    s.phase = s.outboxId ? s.phase : 'ENDED'; s.arm = null; s.segments = []; s.draft = null; s.approved = null; s.recipient = ''; s.confirmed = false;
+    s.phase = s.outboxId ? s.phase : 'ENDED'; s.arm = null; s.segments = []; s.draft = null; s.approved = null; s.recipient = ''; s.confirmed = false; s.recipientCapture = undefined; s.recipientOrigin = undefined;
     this.store.put(s); return s;
   }
   purge() {

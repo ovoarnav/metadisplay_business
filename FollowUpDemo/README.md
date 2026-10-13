@@ -1,6 +1,6 @@
 # Follow-up native iPhone demo
 
-This is an implementation kit adapted from Meta’s official **iOS DisplayAccess** sample. The backend compiles and **42 automated tests pass** on Windows. The user reports successful simulator launch, physical iPhone 17 Pro Max installation, text on the paired Ray-Ban Meta Display glasses and transcript visible on the phone. Counter callbacks, two-person intelligibility and operation with the phone locked remain unconfirmed. The new one-tap app changes are written and syntax-checked, but have not been compiled or installed on the Mac/iPhone. See `STATUS.md` and `TEST_RESULTS.md` for the evidence boundaries.
+This is an implementation kit adapted from Meta’s official **iOS DisplayAccess** sample. The backend compiles and **50 automated tests pass** on Windows. The user reports successful simulator launch, physical iPhone 17 Pro Max installation, text on the paired Ray-Ban Meta Display glasses and transcript visible on the phone. Counter callbacks, two-person intelligibility and operation with the phone locked remain unconfirmed. The new one-tap app changes are written and syntax-checked, but have not been compiled or installed on the Mac/iPhone. See `STATUS.md` and `TEST_RESULTS.md` for the evidence boundaries.
 
 The separate promotional video is outside this app. The configured booking link is [Arnav’s 30 Minute Meeting](https://calendly.com/arnavnambiar981/30min), verified against the connected Calendly account on October 12, 2026. No availability, booking, or schedule was changed.
 
@@ -78,3 +78,7 @@ Speech and Voice Invocations are experimental in SDK 1.0.1; Meta says apps using
 - `evidence/`: actual Windows build/test/source-check output. Native test source exists; native execution does not.
 
 On unknown dispatch, preserve the session identity, use **Check status / Recover previous dispatch identity**, and inspect Gmail Sent privately. An API message ID means Gmail accepted the request; it does not prove recipient inbox arrival. Phrase matching provides no speaker identity authentication: another person saying the entire phrase while armed remains a physical-demo risk to assess during rehearsal.
+
+## Spoken recipient and better email context
+
+Backend-only spoken-address assembly uses “My email is … Email complete” with full literal confirmation on the existing glasses screen. The drafting agent now extracts supported discussion context before composing in a single API call. Read docs/SPOKEN_RECIPIENT_AND_CONTEXT.md for exact usage, limitations and temporary encrypted transcript retention. The first real hosted email was accepted and the user reports receipt; evidence/gmail-first-live-send.json records that separately from automated/fake-transport tests.

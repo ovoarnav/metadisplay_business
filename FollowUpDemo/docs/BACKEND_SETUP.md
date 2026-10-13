@@ -40,9 +40,9 @@ Official references: [Gmail sending](https://developers.google.com/workspace/gma
 
 ## Hosted configuration and verification
 
-The deployment and private configuration are already set up. Use the existing service, not a second project. Its HTTPS base URL is `https://followup-backend-production.up.railway.app` (without `/health`). Open `/health` and expect `ok: true`, `oneTapEnabled: true`, `aiConfigured: true`, `liveSending: false`, and `hardwareCaptureVerified: false`. Those flags do not verify Gmail or physical capture.
+The deployment and private configuration are already set up. Use the existing service, not a second project. Its HTTPS base URL is `https://followup-backend-production.up.railway.app` (without `/health`). Open `/health` and expect `ok: true`, `oneTapEnabled: true`, `aiConfigured: true`, `liveSending: true`, `liveSelfTestOnly: true`, and `hardwareCaptureVerified: false` for the authorized own-address test. Those flags do not verify Gmail or physical capture.
 
-The fixed configuration includes `HOST=0.0.0.0`, `PORT=8080`, `DATABASE_PATH=/data/followup.sqlite`, `ENABLE_ONE_TAP_FOLLOWUP=true`, the pinned drafting model and configured Calendly link. `ALLOW_LIVE_EMAIL=false`, `HARDWARE_CAPTURE_VERIFIED=false`, and an empty test-recipient allowlist remain in place. Keep `DATA_ENCRYPTION_KEY` stable across deployments; replacing it makes existing records unreadable. Protect the key and volume backups privately.
+The fixed configuration includes `HOST=0.0.0.0`, `PORT=8080`, `DATABASE_PATH=/data/followup.sqlite`, `ENABLE_ONE_TAP_FOLLOWUP=true`, the pinned drafting model and configured Calendly link. Hosted service overrides now enable the authorized own-address test: `ALLOW_LIVE_EMAIL=true`, `ALLOW_UNVERIFIED_SELF_TEST=true`, `HARDWARE_CAPTURE_VERIFIED=false`, and `TEST_RECIPIENT_ALLOWLIST=arnavnambiar981@gmail.com`. The distributed template defaults live/self-test off. Keep `DATA_ENCRYPTION_KEY` stable across deployments; replacing it makes existing records unreadable. Protect the key and volume backups privately.
 
 For Gmail, add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` and `GMAIL_SENDER` **to this backend service's Variables tab** after the private consent procedure above. Do not replace the existing device/encryption keys with newly generated local keys. Shared variables require a service reference to take effect; these four Gmail values may instead be service variables directly.
 
@@ -65,3 +65,5 @@ The server commits an immutable send record before provider I/O. Gmail does not 
 ## Authorized first live self-test
 
 Arnav approved Google Web OAuth creation and private credential storage, completed account consent, and selected arnavnambiar981@gmail.com as both sender and first recipient. A real refresh/account identity check passed. `ALLOW_UNVERIFIED_SELF_TEST=true` is an explicit backend button exception bound to the verified GMAIL_SENDER. Set that same address in the allowlist, retain HARDWARE_CAPTURE_VERIFIED=false, and enable live sending only for this own-address test. Other recipients and voice arming retain the original hardware gates. The exception defaults false. See GMAIL_LIVE_SELF_TEST.md for the current deployment and actions; a successful OAuth refresh is not an email dispatch.
+
+The first hosted Gmail self-test returned SENT and Arnav reports inbox receipt; see ../evidence/gmail-first-live-send.json. Spoken address assembly is a later backend-only feature described in SPOKEN_RECIPIENT_AND_CONTEXT.md. Original hardware/launch gates remain pending.
