@@ -1,0 +1,2 @@
+Xcode OpenStep project parses; object references and privacy/transport entries PASS.
+Swift grammar parse PASS for 10 Follow-up source/test files. This is NOT Swift compilation or type checking.

@@ -1,0 +1,42 @@
+✔ compiled JavaScript server starts, responds to health and authenticates session creation (185.6487ms)
+✔ consent required; partials never become notes or commands (66.8896ms)
+✔ out-of-order and duplicate transcript callbacks cannot regress drafts (21.5155ms)
+✔ recipient corrections invalidate literal confirmation and approval (30.2729ms)
+✔ full review required; exact subject/body/link freeze; edit disarms (24.7653ms)
+✔ unarmed, stale pre-arm, wrong epoch, partial, substring and expired cues do not send (30.7083ms)
+✔ valid simulated cue yields DRY_RUN; repeated callbacks never dispatch (31.1153ms)
+✔ live requires hardware verification, HFP, and allowlisted recipient (60.1264ms)
+✔ Meta Speech cannot arm without an audio capture timestamp (23.2196ms)
+✔ unset rehearsed cue blocks arming; no assumed sentence is used (23.1046ms)
+✔ Arnav’s configured complete reveal sentence tolerates typography, not paraphrases (27.3595ms)
+✔ one approved live message dispatches once even during duplicate cue race (27.0846ms)
+✔ interruption/disconnect disarms; old source callbacks cannot send (28.333ms)
+✔ provider timeout persists UNKNOWN and does not retry after restart (30.1571ms)
+✔ restart after committed SENDING is UNKNOWN, never automatic redispatch (24.2192ms)
+✔ new session purges previous prospect and invalidates every old cue (21.6744ms)
+✔ transcript instructions cannot change recipient, URL, authority or fabricate a promise (16.7823ms)
+✔ session authorization, encryption at rest, deletion and expiry (18.0184ms)
+✔ Gmail MIME literal body and encoded subject prevent header injection (0.3932ms)
+✔ Gmail fake transport: token failure never dispatches; timeout is UNKNOWN; acceptance needs ID (2.4246ms)
+✔ HTTP auth, bad JSON, health, owner session flow and no public send endpoint (92.8212ms)
+✔ Follow-up returns promptly, skips message review, and repeated presses share one AI dry-run job (81.9834ms)
+✔ physical Meta Speech button sends once without the voice timestamp requirement (23.8726ms)
+✔ Follow-up requires configured AI, confirmed recipient, finalized notes and explicit enablement (78.2131ms)
+✔ live button gates reject missing hardware evidence, simulated capture and nonallowlisted recipient before AI (59.1254ms)
+✔ pause, recipient correction, deletion and new conversation cancel a pending AI result before dispatch (82.9864ms)
+✔ an old cancelled generation cannot erase the tracking of a newer deliberate Follow-up job (27.0569ms)
+✔ AI failures and invalid generated content never create an outbox or send (43.2482ms)
+✔ restarting during generation pauses the job and prevents automatic dispatch (23.3273ms)
+✔ UNKNOWN Gmail button outcome remains durable and another button press never retries (24.7096ms)
+✔ HTTP Follow-up route authenticates, accepts quickly, exposes progress and completes without Gmail in dry-run (169.1844ms)
+✔ OpenAI agent uses structured output, validates source quotes and adds the fixed booking link in code (1.8284ms)
+✔ AI refusal, truncation, forged evidence and generated addresses/URLs fail closed before Gmail (1.2049ms)
+✔ private provisioning supports LF/CRLF, prints no secrets, and preserves an existing encryption key (287.8813ms)
+ℹ tests 34
+ℹ suites 0
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 780.113

@@ -1,0 +1,14 @@
+{
+  "name": "follow-up-demo-backend",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "provision": "node provision.mjs",
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.ts",
+    "start": "node src/server.ts",
+    "oauth": "node src/oauth.ts"
+  },
+  "devDependencies": { "typescript": "7.0.2", "@types/node": "25.9.5" }
+}

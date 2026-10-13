@@ -8,15 +8,17 @@ Arnav explicitly chose **generate and send immediately on Follow-up, without mes
 
 Set `ENABLE_ONE_TAP_FOLLOWUP=true`, private `OPENAI_API_KEY`, and `OPENAI_MODEL=gpt-4.1-mini-2025-04-14`. Leave `ALLOW_LIVE_EMAIL=false` and `HARDWARE_CAPTURE_VERIFIED=false` until the physical checks and private Gmail setup are complete. Dry-run generation calls OpenAI and is billable; it does not call Gmail. A real synthetic API test passed in 2,796 ms, with no email sent. Source-quote checks do not prove every generated paraphrase is faithful; real conversation quality remains untested.
 
-The Railway account is connected. A private **Follow-up Demo** project was created at `https://railway.com/project/5e7b5c27-2d3e-4a57-a355-b137a962106d`. One backend service and a 500 MB volume were staged. Arnav authorized deployment and storage of the supplied OpenAI key and newly generated device/encryption keys after automatic approval initially rejected the generated-key transfer. Authorized staging then succeeded. Keys are never included in this kit, a PR or build logs. The deployment result and URL are recorded in `STATUS.md`; a staged service is not a running server.
+The Railway account is connected and Arnav authorized deployment and storage of the supplied OpenAI key and generated device/encryption keys. **The backend is deployed** at https://followup-backend-production.up.railway.app, with one service and a 500 MB persistent volume mounted at `/data`. The project is https://railway.com/project/5e7b5c27-2d3e-4a57-a355-b137a962106d. Source is pinned to commit `376836282c1db390009ed96082cd8d4712b35198` on `codex/followup-ai-send-20261012`. The repository became public at Arnav's request after credential-pattern scans of the source history and embedded ZIP; server keys stay private in Railway.
 
-The source repository is `ovoarnav/metadisplay_business`. Repository-root deployment files use `Dockerfile.followup`, which copies only `FollowUpDemo/backend/package.json` and `FollowUpDemo/backend/src/`; root `railway.json` selects it and requires `/data`. This avoids depending on a custom service root for the initial deployment. The backend's own Dockerfile/railway.json remain available for standalone deployment. On Railway, `RAILWAY_RUN_UID=0` is the documented workaround for its root-owned volumes; no non-root runtime claim is made for that hosted configuration.
+Railway built `Dockerfile.followup`, started the container, mounted the volume and passed health checks. A hosted synthetic test returned HTTP 202, completed AI drafting in 3,345 ms, included the configured Calendly link, and ended in DRY_RUN. Repeated presses returned the same outbox. Unauthenticated requests returned 401. Gmail was never called. This proves hosted generation and database writes, not Gmail authorization, native installation, hardware capture or persistence across a replacement container. Sanitized evidence is in `evidence/hosted-dry-run.json`.
+
+Private values live in project shared variables and are linked into the service through reference variables. To configure the phone, copy `APP_AUTH_TOKEN` privately from **Project Settings > Shared Variables > production**. Only that device token goes to the phone. The service has explicit Dockerfile, healthcheck, no-sleep and restart settings; one replica remains configured. Legacy `railway.json` files are included for compatibility, but setting a custom Config as Code file is deprecated in current Railway. Do not add that setting to this service. Its current settings already deploy successfully. On Railway `RAILWAY_RUN_UID=0` handles its root-owned volume; the generic Dockerfile remains USER node.
 
 Arnav still performs these account/device actions:
 
 1. **Gmail consent:** use the private Google Cloud/OAuth procedure below. The connected Gmail plugin is not the app's runtime credential source. Google authorization and real Gmail sending have not been tested here.
 2. **Mac update:** apply the FollowUpNextStage patch to the existing kit, preserving Xcode signing, private `.env` and data. Rebuild/run the app on the physical iPhone using the same signing team. This agent has syntax-checked the new native source only.
-3. **Phone configuration:** after deployment, use its HTTPS base URL and copy only `APP_AUTH_TOKEN` from Railway's private configuration to the phone's Device access token field. Save backend setup. OpenAI/Gmail/encryption secrets stay on Railway.
+3. **Phone configuration:** use `https://followup-backend-production.up.railway.app` as the HTTPS base URL and copy only `APP_AUTH_TOKEN` from Railway's private configuration to the phone's Device access token field. Save backend setup. OpenAI/Gmail/encryption secrets stay on Railway.
 4. **Hardware check and dry-run:** obtain consent to transcription and AI drafting, confirm a literal recipient, capture both people with the phone locked and the debugger disconnected, then press Follow-up. Expect GENERATING then DRY_RUN. Inspect the generated recipient/body/Calendly afterward. Repeated presses must not create another job or outbox.
 5. **One live Gmail test:** privately authorize the sender, allowlist one consenting recipient, and set the hardware flag only after the physical checks pass. Enable live sending for that limited rehearsal. Pressing Follow-up sends without a review screen. Check Gmail acceptance, Sent and inbox independently, then disable live sending again. UNKNOWN has no automatic retry.
 
@@ -32,62 +34,21 @@ Rotate the OpenAI key pasted into chat and replace it in Railway's private confi
 
 Official references: [Gmail sending](https://developers.google.com/workspace/gmail/api/guides/sending), [OAuth web server flow](https://developers.google.com/identity/protocols/oauth2/web-server), [Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes).
 
-## Hosting — an authorized destination is needed
+## Hosted configuration and verification
 
-Railway was selected and deployment explicitly authorized. Use one instance and a persistent volume at `/data`. Do not use ephemeral/serverless storage for the outbox. Terminate HTTPS at the hosting platform/reverse proxy. Initial container/volume behavior still needs the deployment verification recorded in STATUS.md.
+The deployment and private configuration are already set up. Use the existing service, not a second project. Its HTTPS base URL is `https://followup-backend-production.up.railway.app` (without `/health`). Open `/health` and expect `ok: true`, `oneTapEnabled: true`, `aiConfigured: true`, `liveSending: false`, and `hardwareCaptureVerified: false`. Those flags do not verify Gmail or physical capture.
 
-Provision:
+The fixed configuration includes `HOST=0.0.0.0`, `PORT=8080`, `DATABASE_PATH=/data/followup.sqlite`, `ENABLE_ONE_TAP_FOLLOWUP=true`, the pinned drafting model and configured Calendly link. `ALLOW_LIVE_EMAIL=false`, `HARDWARE_CAPTURE_VERIFIED=false`, and an empty test-recipient allowlist remain in place. Keep `DATA_ENCRYPTION_KEY` stable across deployments; replacing it makes existing records unreadable. Protect the key and volume backups privately.
 
-```text
-APP_AUTH_TOKEN             random 32+ characters, provision only to this iPhone
-DATA_ENCRYPTION_KEY        persistent 32 bytes encoded as 64 hex characters
-DATABASE_PATH             /data/followup.sqlite
-CALENDLY_URL              https://calendly.com/arnavnambiar981/30min
-SEND_CUE                  I just realized I haven't shown you how good I am as a developer
-ALLOW_LIVE_EMAIL          false
-HARDWARE_CAPTURE_VERIFIED false
-TEST_RECIPIENT_ALLOWLIST  initially blank
-GOOGLE_CLIENT_ID          private OAuth application value
-GOOGLE_CLIENT_SECRET      private OAuth secret
-GOOGLE_REFRESH_TOKEN      private token from user’s consent
-GMAIL_SENDER              account verified by the consent helper
-```
+For Gmail, add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` and `GMAIL_SENDER` **to this backend service's Variables tab** after the private consent procedure above. Do not replace the existing device/encryption keys with newly generated local keys. Shared variables require a service reference to take effect; these four Gmail values may instead be service variables directly.
 
-Keep the encryption key stable across restarts; losing it makes stored sessions unreadable. Back up the volume and key privately. `/health` returns only readiness/provider/live-mode information. Run `curl -f https://<your-host>/health`, then configure that URL in phone setup. Deploying the runtime means it continues without Codex or a laptop; no such deployment has happened yet.
+Railway source is deliberately pinned: pushing later commits does not redeploy. To change the build, reconnect the intended source commit. A redeployment and recovery check has not yet been performed. Never restart or replace a container while a message is GENERATING, ARMED or SENDING. Check UNKNOWN against Gmail Sent privately; it never retries automatically.
 
-## Recommended hosting: Railway
-
-Arnav reports no existing hosting account. Railway is a recommendation, not an existing deployment or authorization to purchase a plan. Checked October 12, 2026: its [Hobby plan](https://docs.railway.com/pricing/plans) costs $5/month including $5 of resource usage; usage above that adds to the bill. Railway supplies [HTTPS domains](https://docs.railway.com/networking/public-networking) and [persistent volumes](https://docs.railway.com/volumes), which match this demo's requirements. Arnav performs account creation, GitHub access authorization and any billing selection.
-
-1. Create a Railway account. For source deployment, connect the intended GitHub repository and create a service. Set the service's root directory to the actual backend folder containing `Dockerfile` and `src/` (`backend` if the repository starts at the kit root; `FollowUpDemo/backend` if the kit is nested in the repository). Use the existing Dockerfile. Do not upload `.env`, `.data`, credentials or conversation records to GitHub.
-2. Attach a persistent volume at `/data`. Keep one replica. Railway mounts volumes as root, while the supplied Dockerfile uses the `node` user. For the unchanged kit, Railway's documented workaround is the service variable `RAILWAY_RUN_UID=0`; this runs the demo container as root. The generic Dockerfile remains non-root. Railway deployment and volume write permissions have not been tested here. See the permissions section in its volume guide.
-3. On the Mac, with Node 24+ installed, run `node scripts/provision-local.mjs` from the kit root if `backend/.env` does not already exist. It creates the device token and encryption key privately. Preserve an existing file and key. Run `npm ci`, `npm run build` and `npm test` from `backend` to verify the copied backend.
-4. In the Railway service's Variables tab, enter the generated `APP_AUTH_TOKEN` and `DATA_ENCRYPTION_KEY` privately. Add the following values. Do not import the local `HOST=127.0.0.1` or local database path into hosting.
-
-```text
-HOST=0.0.0.0
-PORT=8080
-DATABASE_PATH=/data/followup.sqlite
-RAILWAY_RUN_UID=0
-CALENDLY_URL=https://calendly.com/arnavnambiar981/30min
-SEND_CUE=I just realized I haven't shown you how good I am as a developer
-ALLOW_LIVE_EMAIL=false
-HARDWARE_CAPTURE_VERIFIED=false
-TEST_RECIPIENT_ALLOWLIST=
-```
-
-In the web Variables form, enter `SEND_CUE` without enclosing quotation marks; the local `.env` template uses quotes because it is a dotenv file. Gmail variables may remain empty for dry-run drafting and review. A healthy dry-run server does not establish Gmail authorization.
-
-5. Deploy, inspect the deployment logs privately and verify successful database creation. In Settings > Networking > Public Networking, use Generate Domain with target port 8080. Set the health-check path to `/health`. Open `https://<generated-domain>/health`; expect `ok: true` and `liveSending: false`. This checks server startup, not inbox delivery or hardware capture.
-6. In Follow-up on the iPhone, enter the generated HTTPS base URL (without `/health`) and the matching `APP_AUTH_TOKEN` as Device access token. Tap Save backend setup. Enter a consenting test recipient's full literal address and obtain both participants' transcription consent.
-7. Rehearse with live sending disabled. Use Selected glasses HFP for the spoken arm/cue test. Confirm the full recipient, review all frozen pages including the Calendly link, arm deliberately and say the configured sentence within 15 seconds. Expect DRY_RUN and no Gmail call. Separately verify that the persisted session can be recovered after a server restart; do not deliberately restart during an armed or live dispatch.
-8. Complete the private Gmail authorization procedure above when ready. Put its credentials in Railway's private Variables, never in iPhone fields. Real sending remains a later, explicitly authorized test after hardware and dry-run evidence passes.
-
-No Railway account, repository connection, container build, persistent-volume test, hosted `/health` request or cloud deployment has been performed by this agent.
+Railway's [Hobby plan](https://docs.railway.com/pricing/plans) lists $5/month including $5 of usage, with excess resource usage billed separately. The actual account plan/billing selection was not changed here. [Reference variables](https://docs.railway.com/variables), [volumes](https://docs.railway.com/volumes) and [HTTPS domains](https://docs.railway.com/networking/public-networking) describe the platform settings used.
 
 ## Live enablement — a concrete authorized test remains
 
-After recording physical display, two-person capture, locked/pocketed operation and the fresh cue boundary, obtain Arnav’s explicit approval for one named consenting test recipient. Add that literal address to the allowlist, set the hardware verification flag and enable live sending. A source other than `hfp` cannot live-arm. Disable live sending again after the rehearsal. Setting a flag is not evidence that a hardware test passed.
+After recording physical display, useful two-person capture and locked/pocketed operation, choose one named consenting test recipient for the live rehearsal. Add that literal address to `TEST_RECIPIENT_ALLOWLIST`, set `HARDWARE_CAPTURE_VERIFIED=true` only when those checks pass, and set `ALLOW_LIVE_EMAIL=true` for that limited test. The Follow-up button sends the generated message without review, as Arnav requested. The optional spoken-cue route additionally requires the fresh HFP cue test; Meta Speech cannot voice-arm. Disable live sending again after rehearsal. A flag is not evidence that a hardware test passed.
 
 The connected Gmail plugin in Codex is not a runtime credential provider for this app. This implementation never asks Codex to send an email through a connector, retrieve account secrets or impersonate a different sending address.
 
