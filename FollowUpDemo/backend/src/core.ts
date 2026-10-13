@@ -14,8 +14,9 @@ export type Session = {
   reviewPage: number; arm: { epoch: string; minCaptureMs: number; deadline: number } | null;
   created: number; expires: number; outcome: string; outboxId: string | null;
   legacyReviewFlow?: boolean;
+  selfTestOnly?: boolean;
 };
-export type Config = { cue: string; live: boolean; allowlist: string[]; hardwareVerified: boolean; oneTap?: boolean; legacyReviewFollowup?: boolean };
+export type Config = { cue: string; live: boolean; allowlist: string[]; hardwareVerified: boolean; oneTap?: boolean; legacyReviewFollowup?: boolean; selfTestRecipient?: string };
 export type Drafter = { draft: (segments: Segment[], version: number) => Promise<Draft> };
 export type ProviderOutcome = { status: 'SENT' | 'FAILED' | 'UNKNOWN'; detail: string; providerId?: string };
 export type Sender = { send: (message: { recipient: string; subject: string; body: string; identity: string }) => Promise<ProviderOutcome> };
@@ -207,7 +208,7 @@ export class Controller {
       if (s.phase !== 'DRAFTING' || !s.confirmed || !s.recipient || !s.segments.some(x => x.final && x.text.trim())) {
         throw new Fault('Start a conversation, confirm the literal recipient, and capture finalized notes before Follow-up.');
       }
-      if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
+      if (this.config.live && !this.liveFollowupAllowed(s)) {
         throw new Fault('Live Follow-up needs verified physical capture/display and an allowlisted test recipient.');
       }
       s.phase = 'GENERATING'; s.arm = null; s.epoch = randomUUID(); s.legacyReviewFlow = legacyReviewFlow;
@@ -227,6 +228,10 @@ export class Controller {
     return state;
   }
   async waitForFollowup(id: string): Promise<void> { await this.followupJobs.get(id); }
+  private liveFollowupAllowed(s: Session): boolean {
+    if (s.source === 'simulation' || !this.config.allowlist.includes(s.recipient)) return false;
+    return this.config.hardwareVerified || (!!this.config.selfTestRecipient && s.recipient === this.config.selfTestRecipient);
+  }
   private async generateFollowup(snapshot: Session): Promise<Session> {
     const { id, owner, epoch } = snapshot;
     let draft: Draft;
@@ -253,8 +258,8 @@ export class Controller {
       const s = this.read(id, owner);
       // Cancel, correction, expiry, or a new conversation invalidates this result.
       if (s.phase !== 'GENERATING' || s.epoch !== epoch || !s.confirmed || s.recipient !== snapshot.recipient) return;
-      if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
-        s.phase = 'DRAFTING'; s.outcome = 'Live sending configuration changed. No email sent.'; this.store.put(s); return;
+      if (this.config.live && !this.liveFollowupAllowed(s)) {
+        s.phase = s.legacyReviewFlow ? 'FAILED' : 'DRAFTING'; s.outcome = 'Live sending configuration changed. No email sent.'; this.store.put(s); return;
       }
       s.draft = { ...draft, version: snapshot.revision + 1 };
       const message = { ...s.draft, recipient: s.recipient };
@@ -262,6 +267,7 @@ export class Controller {
       // not by message review. Recipient/Calendly/dispatch remain controlled by code.
       s.approved = { ...message, digest: hash(JSON.stringify(message)) };
       const identity = `${s.id}:${s.approved.digest}`;
+      s.selfTestOnly = this.config.live && !this.config.hardwareVerified && s.recipient === this.config.selfTestRecipient;
       s.outboxId = identity; s.phase = this.config.live ? 'SENDING' : 'DRY_RUN';
       s.outcome = this.config.live ? 'Sending the generated email through Gmail…' : 'AI email generated in dry-run mode. No email sent.';
       if (s.legacyReviewFlow) s.outcome += `\nTo: ${s.recipient}\nSubject: ${s.draft.subject}`;
@@ -278,11 +284,15 @@ export class Controller {
       let result: ProviderOutcome;
       try { result = await this.sender.send(pending); }
       catch { result = { status: 'UNKNOWN', detail: 'Provider outcome unknown; inspect Gmail Sent. Do not resend.' }; }
+      // Provider status only: never log transcripts, email content or credentials.
+      console.info(`Follow-up Gmail outcome: ${result.status}`);
       this.store.transaction(() => {
         const s = this.store.get(id, owner);
         if (!s.outboxId) throw new Fault('Send identity missing');
         this.store.db.prepare('UPDATE outbox SET status=?,provider_id=? WHERE id=?').run(result.status, result.providerId ?? null, s.outboxId);
-        s.phase = result.status; s.outcome = result.detail; s.arm = null; this.store.put(s);
+        s.phase = result.status; s.outcome = result.detail;
+        if (s.selfTestOnly) s.outcome += '\nSelf-test to your Gmail account only. Hardware verification is pending.';
+        s.arm = null; this.store.put(s);
       });
   }
   end(id: string, owner: string): Session {

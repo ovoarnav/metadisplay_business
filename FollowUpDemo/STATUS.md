@@ -23,16 +23,16 @@
 | Warm glasses VoiceInvocation launch | UNTESTED | Experimental listener/acknowledgement written. Requires Meta approval/app-name setup and physical execution. |
 | Glasses app-picker / cold / force-quit launch | UNTESTED | Separate acceptance cases. No supported picker registration or OS wake behavior established here. |
 | TypeScript backend compilation | PASS | TypeScript 7.0.2 emitted JavaScript; compiled server exercised locally. |
-| Backend / provider fake-transport tests | PASS | 38 tests passed, including one-tap generation, asynchronous HTTP progress, cancellation, duplicate presses, restart recovery, evidence validation and private provisioning. No email sent. |
+| Backend / provider fake-transport tests | PASS | 42 tests passed, including one-tap generation, asynchronous HTTP progress, cancellation, duplicate presses, restart recovery, evidence validation and private provisioning. No email sent. |
 | OpenAI drafting agent | PASS (synthetic real API call) | One real Responses API test generated a synthetic email in 2,796 ms using gpt-4.1-mini-2025-04-14. Configurable server-only model/key. No real transcript or Gmail call; generation quality and latency on glasses conversations are untested. |
 | One-tap generate-and-send source | PASS (written; backend compiled/tested) | Explicitly requested by Arnav without message review. Recipient confirmation remains. New native button/polling/UI code syntax-checks, but is not compiled or installed on the Mac/iPhone. |
 | Installed-app Review compatibility | PASS (compiled/protocol tests; deployed) | Backend-only opt-in routes existing Review to AI/send, with status polling understood by old client. Capture diagnostic does not upload; separate email mode does. No new native build required. Pinned deployed commit 1d7521dddecc1b3d93c848f0fb4220ccbfffff4f; health confirms compatibility true/live false. Physical upload/gesture test remains open. See evidence/legacy-deployment.json. |
 | Railway account | PASS (connected tool verified) | Authenticated account verified; private Follow-up Demo project created. |
 | Server deployed over HTTPS | PASS (hosted dry-run) | Railway Docker build/start/volume mount and public health passed. Synthetic AI draft completed in 3,345 ms; repeated presses share an outbox; unauthenticated request 401; no Gmail call. See evidence/hosted-dry-run.json. |
 | Persistent volume | ATTACHED / WRITE PASS; recovery UNTESTED | 500 MB at /data; hosted session/outbox created. Recovery across a new deployment has not been tested. |
-| Gmail account authorization | BLOCKED | User selected Gmail. OAuth bootstrap provided; user must authorize the intended account privately. |
+| Gmail account authorization | PASS (real OAuth) | Arnav approved Google consent. Refresh and verified account identity passed for arnavnambiar981@gmail.com. Private credentials stored in Railway; see evidence/gmail-authorization.json. |
 | Rehearsed cue configured | PASS (source configuration) | “I just realized I haven't shown you how good I am as a developer” is the server default and environment template value. Actual speech recognition and rehearsal remain UNTESTED. |
-| Live Gmail send | UNTESTED / DISABLED | Default flags false; hardware evidence, explicit live test authorization and recipient allowlist still required. |
+| Live Gmail send | SELF-TEST PREPARED; dispatch UNTESTED | Arnav authorized a first live test to his own address. Backend-only exception is compiled/tested and defaults off; own-address test can run without falsely passing hardware checks. See docs/GMAIL_LIVE_SELF_TEST.md and current deployment evidence. |
 | Recipient inbox delivery / booking | UNTESTED | Neither has been performed. |
 
 This kit is not yet a proved end-to-end hardware demo. Code/backend progress does not satisfy the real-device gate. The Mac, capture feasibility, launch and account gates stay open.
