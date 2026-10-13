@@ -282,7 +282,7 @@ export class Controller {
             if (s.phase !== 'DRAFTING' || !s.confirmed || !s.recipient || !s.segments.some(x => x.final && x.text.trim())) {
                 throw new Fault('Start a conversation, confirm the literal recipient, and capture finalized notes before Follow-up.');
             }
-            if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
+            if (this.config.live && !this.liveFollowupAllowed(s)) {
                 throw new Fault('Live Follow-up needs verified physical capture/display and an allowlisted test recipient.');
             }
             s.phase = 'GENERATING';
@@ -308,6 +308,11 @@ export class Controller {
         return state;
     }
     async waitForFollowup(id) { await this.followupJobs.get(id); }
+    liveFollowupAllowed(s) {
+        if (s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))
+            return false;
+        return this.config.hardwareVerified || (!!this.config.selfTestRecipient && s.recipient === this.config.selfTestRecipient);
+    }
     async generateFollowup(snapshot) {
         const { id, owner, epoch } = snapshot;
         let draft;
@@ -336,8 +341,8 @@ export class Controller {
             // Cancel, correction, expiry, or a new conversation invalidates this result.
             if (s.phase !== 'GENERATING' || s.epoch !== epoch || !s.confirmed || s.recipient !== snapshot.recipient)
                 return;
-            if (this.config.live && (!this.config.hardwareVerified || s.source === 'simulation' || !this.config.allowlist.includes(s.recipient))) {
-                s.phase = 'DRAFTING';
+            if (this.config.live && !this.liveFollowupAllowed(s)) {
+                s.phase = s.legacyReviewFlow ? 'FAILED' : 'DRAFTING';
                 s.outcome = 'Live sending configuration changed. No email sent.';
                 this.store.put(s);
                 return;
@@ -348,6 +353,7 @@ export class Controller {
             // not by message review. Recipient/Calendly/dispatch remain controlled by code.
             s.approved = { ...message, digest: hash(JSON.stringify(message)) };
             const identity = `${s.id}:${s.approved.digest}`;
+            s.selfTestOnly = this.config.live && !this.config.hardwareVerified && s.recipient === this.config.selfTestRecipient;
             s.outboxId = identity;
             s.phase = this.config.live ? 'SENDING' : 'DRY_RUN';
             s.outcome = this.config.live ? 'Sending the generated email through Gmail…' : 'AI email generated in dry-run mode. No email sent.';
@@ -372,6 +378,8 @@ export class Controller {
         catch {
             result = { status: 'UNKNOWN', detail: 'Provider outcome unknown; inspect Gmail Sent. Do not resend.' };
         }
+        // Provider status only: never log transcripts, email content or credentials.
+        console.info(`Follow-up Gmail outcome: ${result.status}`);
         this.store.transaction(() => {
             const s = this.store.get(id, owner);
             if (!s.outboxId)
@@ -379,6 +387,8 @@ export class Controller {
             this.store.db.prepare('UPDATE outbox SET status=?,provider_id=? WHERE id=?').run(result.status, result.providerId ?? null, s.outboxId);
             s.phase = result.status;
             s.outcome = result.detail;
+            if (s.selfTestOnly)
+                s.outcome += '\nSelf-test to your Gmail account only. Hardware verification is pending.';
             s.arm = null;
             this.store.put(s);
         });

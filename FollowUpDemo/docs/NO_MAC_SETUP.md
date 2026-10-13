@@ -24,3 +24,5 @@ Gmail consent is complete. Arnav authorized the first live test with himself as 
 This is a backend-only compatibility change. Tests simulate the installed client's HTTP protocol; the new behavior has not yet been exercised by Arnav's installed binary or real glasses. Current deployment evidence is in STATUS.md.
 
 Deployment verified: commit 1d7521dddecc1b3d93c848f0fb4220ccbfffff4f, Railway SUCCESS, public health legacyReviewFollowup: true, live flags false, unauthenticated Review 401. The installed phone test is pending configuration of its backend URL/device token.
+
+Current hosted self-test deployment: Railway **SUCCESS**, deployment `bc519cb5-a4e3-4b24-b094-50a06da6f8e4`, pinned source `569581d2814f816b6748dcea7ae3d4f1cbf5a772`. Public health verifies Gmail configured/live own-address mode; unauthenticated Review returns 401. See ../evidence/gmail-live-deployment.json. This is readiness evidence, not dispatch or inbox proof. The unused original OAuth bootstrap secret was disabled after the new configured secret passed a real refresh check.

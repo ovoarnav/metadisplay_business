@@ -17,3 +17,5 @@ If the outcome is UNKNOWN, inspect Gmail Sent before taking any further action; 
 The verified Gmail grant contains send access and OpenID/email identity scopes, not mailbox read/delete access. Google testing-mode refresh tokens for Gmail can expire after seven days; reauthorization may be needed for a later rehearsal. See [Google OAuth token expiration](https://developers.google.com/identity/protocols/oauth2#expiration).
 
 Native compilation/installation of newer app source, simultaneous useful two-person capture, locked/pocketed-phone operation and launch from glasses remain separate acceptance checks. This backend change does not claim those checks passed.
+
+Current hosted self-test deployment: Railway **SUCCESS**, deployment `bc519cb5-a4e3-4b24-b094-50a06da6f8e4`, pinned source `569581d2814f816b6748dcea7ae3d4f1cbf5a772`. Public health verifies Gmail configured/live own-address mode; unauthenticated Review returns 401. See ../evidence/gmail-live-deployment.json. This is readiness evidence, not dispatch or inbox proof. The unused original OAuth bootstrap secret was disabled after the new configured secret passed a real refresh check.

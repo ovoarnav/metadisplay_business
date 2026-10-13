@@ -30,6 +30,9 @@ export function makeServer(controller, token) {
             reply(200, { ok: true, provider: 'gmail', liveSending: controller.config.live,
                 oneTapEnabled: controller.config.oneTap === true, aiConfigured: controller.drafter != null,
                 hardwareCaptureVerified: controller.config.hardwareVerified,
+                liveSelfTestOnly: controller.config.live && !controller.config.hardwareVerified && !!controller.config.selfTestRecipient,
+                gmailConfigured: controller.sender instanceof GmailSender &&
+                    Object.values(controller.sender.config).every(value => !!value),
                 legacyReviewFollowup: controller.config.legacyReviewFollowup === true });
             return;
         }
@@ -109,7 +112,10 @@ export function run() {
     const store = new Store(path, Buffer.from(env.DATA_ENCRYPTION_KEY, 'hex'));
     const controller = new Controller(store, { cue: env.SEND_CUE ?? DEFAULT_SEND_CUE, live: env.ALLOW_LIVE_EMAIL === 'true',
         allowlist: (env.TEST_RECIPIENT_ALLOWLIST ?? '').split(',').map(s => s.trim()).filter(Boolean), hardwareVerified: env.HARDWARE_CAPTURE_VERIFIED === 'true',
-        oneTap: env.ENABLE_ONE_TAP_FOLLOWUP === 'true', legacyReviewFollowup: env.LEGACY_REVIEW_FOLLOWUP === 'true' }, new GmailSender({ clientId: env.GOOGLE_CLIENT_ID ?? '', clientSecret: env.GOOGLE_CLIENT_SECRET ?? '', refreshToken: env.GOOGLE_REFRESH_TOKEN ?? '', sender: env.GMAIL_SENDER ?? '' }), Date.now, env.OPENAI_API_KEY ? new OpenAIDrafter(env.OPENAI_API_KEY, env.OPENAI_MODEL || DEFAULT_DRAFT_MODEL) : undefined);
+        oneTap: env.ENABLE_ONE_TAP_FOLLOWUP === 'true', legacyReviewFollowup: env.LEGACY_REVIEW_FOLLOWUP === 'true',
+        // This exception never enables voice sending or another recipient. Gmail OAuth
+        // bootstrap verifies the account matches GMAIL_SENDER before provisioning.
+        selfTestRecipient: env.ALLOW_UNVERIFIED_SELF_TEST === 'true' ? env.GMAIL_SENDER : undefined }, new GmailSender({ clientId: env.GOOGLE_CLIENT_ID ?? '', clientSecret: env.GOOGLE_CLIENT_SECRET ?? '', refreshToken: env.GOOGLE_REFRESH_TOKEN ?? '', sender: env.GMAIL_SENDER ?? '' }), Date.now, env.OPENAI_API_KEY ? new OpenAIDrafter(env.OPENAI_API_KEY, env.OPENAI_MODEL || DEFAULT_DRAFT_MODEL) : undefined);
     const server = makeServer(controller, env.APP_AUTH_TOKEN ?? '');
     server.listen(Number(env.PORT ?? 8080), env.HOST ?? '127.0.0.1', () => {
         const address = server.address();
